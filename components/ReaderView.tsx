@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import styled, { css } from 'styled-components';
 import { AnimatePresence, motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Chapter } from '@/types';
 import ChapterReader from './ChapterReader';
 import Minimap from './Minimap';
@@ -133,12 +134,14 @@ const MobileDismissBtn = styled.button`
   }
 `;
 
-interface ReaderViewProps {
-  sessionId: string | null;
-  workId: string | null;
-}
+export default function ReaderView() {
+  const router = useRouter();
+  const params = useParams<{ chapterSlug?: string }>();
+  const searchParams = useSearchParams();
+  const urlSlug = params?.chapterSlug ?? null;
 
-export default function ReaderView({ sessionId, workId }: ReaderViewProps) {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [workId, setWorkId] = useState<string | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapterId, setCurrentChapterId] = useState<string | null>(null);
   const [mobileWarningDismissed, setMobileWarningDismissed] = useState(false);
@@ -155,8 +158,39 @@ export default function ReaderView({ sessionId, workId }: ReaderViewProps) {
     } catch { /* silent */ }
   }, []);
 
+  // Build a /read/<slug>?<preserved-query> URL
+  const chapterHref = useCallback((slug: string) => {
+    const qs = searchParams?.toString();
+    return `/read/${slug}${qs ? `?${qs}` : ''}`;
+  }, [searchParams]);
+
+  // Session: create or resume on mount
+  useEffect(() => {
+    const inviteToken = searchParams?.get('invite') ?? undefined;
+    (async () => {
+      try {
+        const anonymousId = localStorage.getItem('anonymousId') ?? undefined;
+        const response = await fetch('/api/public/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ inviteToken, anonymousId }),
+        });
+        const data = await response.json();
+        localStorage.setItem('anonymousId', data.anonymousId);
+        localStorage.setItem('sessionId', data.sessionId);
+        setSessionId(data.sessionId);
+        setWorkId(data.workId);
+      } catch (error) {
+        console.error('Error creating session:', error);
+      }
+    })();
+    // run-once on mount; subsequent param changes don't recreate session
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     fetchChapters();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchChapters = async () => {
@@ -172,8 +206,6 @@ export default function ReaderView({ sessionId, workId }: ReaderViewProps) {
         if (firstId) chapterCache.current[firstId] = data.firstChapter;
       }
 
-      if (chapterList.length > 0) setCurrentChapterId(chapterList[0].id);
-
       // Background-prefetch all remaining chapters
       for (const ch of chapterList.slice(1)) {
         prefetchChapter(ch.id);
@@ -184,6 +216,32 @@ export default function ReaderView({ sessionId, workId }: ReaderViewProps) {
       setLoading(false);
     }
   };
+
+  // Sync currentChapterId from URL slug whenever chapters or slug change.
+  // - URL has a known slug → select that chapter.
+  // - URL has unknown slug → fall back to first chapter and replace URL.
+  // - URL has no slug (bare /read) → first chapter, canonicalize URL via replace.
+  useEffect(() => {
+    if (chapters.length === 0) return;
+    if (urlSlug) {
+      const match = chapters.find(c => c.slug === urlSlug);
+      if (match) {
+        if (match.id !== currentChapterId) setCurrentChapterId(match.id);
+      } else {
+        // Unknown slug — friendlier to land on first chapter than 404
+        router.replace(chapterHref(chapters[0].slug));
+      }
+    } else {
+      router.replace(chapterHref(chapters[0].slug));
+    }
+  }, [urlSlug, chapters, router, chapterHref, currentChapterId]);
+
+  // User-initiated chapter changes update the URL (push so back button works).
+  const navigateToChapter = useCallback((id: string) => {
+    const ch = chapters.find(c => c.id === id);
+    if (!ch) return;
+    router.push(chapterHref(ch.slug));
+  }, [chapters, router, chapterHref]);
 
   if (loading) return (
     <Page style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -205,7 +263,13 @@ export default function ReaderView({ sessionId, workId }: ReaderViewProps) {
         </MobileWarning>
       )}
 
-      <Minimap contentRef={chapterContentRef} onHoverStart={() => setSidebarOpen(true)} />
+      <Minimap
+        contentRef={chapterContentRef}
+        onHoverStart={() => setSidebarOpen(true)}
+        chapters={chapters}
+        currentChapterId={currentChapterId}
+        onChapterChange={navigateToChapter}
+      />
 
       <AnimatePresence>
         {sidebarOpen && (
@@ -226,7 +290,7 @@ export default function ReaderView({ sessionId, workId }: ReaderViewProps) {
                   key={chapter.id}
                   $active={chapter.id === currentChapterId}
                   onClick={() => {
-                    setCurrentChapterId(chapter.id);
+                    navigateToChapter(chapter.id);
                     setSidebarOpen(false);
                   }}
                 >
@@ -250,7 +314,7 @@ export default function ReaderView({ sessionId, workId }: ReaderViewProps) {
             prefetchedData={chapterCache.current[currentChapterId]}
             prevChapterId={chapters[chapters.findIndex(c => c.id === currentChapterId) - 1]?.id ?? null}
             nextChapterId={chapters[chapters.findIndex(c => c.id === currentChapterId) + 1]?.id ?? null}
-            onNavigate={setCurrentChapterId}
+            onNavigate={navigateToChapter}
             contentElRef={chapterContentRef}
           />
         )}

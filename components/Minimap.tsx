@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { motion, AnimatePresence } from 'motion/react';
+import { Chapter } from '@/types';
 
 const MinimapContainer = styled.div`
   position: fixed;
-  left: 0;
+  left: 14px;
   top: 0;
   height: 100vh;
   width: 28px;
@@ -25,28 +25,57 @@ const MinimapContainer = styled.div`
 const MinimapInner = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 4px;
   padding: 0 6px;
+  width: 100%;
 `;
 
-const MinimapLine = styled.div<{ $active: boolean; $width: number }>`
-  height: 2px;
-  border-radius: 1px;
-  background: ${p => p.$active ? 'rgba(26,26,24,0.5)' : 'rgba(26,26,24,0.15)'};
-  width: ${p => Math.max(6, p.$width)}px;
-  transition: background 0.2s ease, width 0.2s ease;
+const ChapterBlock = styled.div<{ $isCurrent: boolean }>`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+  border-top: 1px solid ${p => p.$isCurrent ? 'rgba(26,26,24,0.18)' : 'rgba(26,26,24,0.06)'};
+  &:first-child { border-top: none; }
 `;
+
+const MinimapLine = styled.div<{
+  $active: boolean;
+  $width: number;
+  $dim: boolean;
+  $thick: boolean;
+}>`
+  height: ${p => p.$thick ? 2 : 1}px;
+  border-radius: 1px;
+  background: ${p =>
+    p.$active
+      ? 'rgba(26,26,24,0.7)'
+      : p.$dim
+        ? 'rgba(26,26,24,0.10)'
+        : 'rgba(26,26,24,0.22)'};
+  width: ${p => Math.max(4, p.$width)}px;
+  transition: background 0.2s ease;
+`;
+
+const DEFAULT_OTHER_LINES = 6;
 
 interface MinimapProps {
   contentRef: React.RefObject<HTMLDivElement | null>;
   onHoverStart: () => void;
+  chapters: Chapter[];
+  currentChapterId: string | null;
+  onChapterChange: (id: string) => void;
 }
 
-export default function Minimap({ contentRef, onHoverStart }: MinimapProps) {
+export default function Minimap({
+  contentRef,
+  onHoverStart,
+  chapters,
+  currentChapterId,
+  onChapterChange,
+}: MinimapProps) {
   const [paragraphs, setParagraphs] = useState<{ length: number }[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
 
-  // Parse paragraphs from rendered content using MutationObserver
   useEffect(() => {
     const parseContent = () => {
       if (!contentRef.current) return;
@@ -55,13 +84,12 @@ export default function Minimap({ contentRef, onHoverStart }: MinimapProps) {
         length: (el.textContent || '').length,
       }));
       if (pData.length > 0) setParagraphs(pData);
+      else setParagraphs([]);
     };
 
-    // Initial parse (may need a small delay for ref to be assigned)
     parseContent();
     const timer = setTimeout(parseContent, 200);
 
-    // Watch for content changes via MutationObserver
     const observer = new MutationObserver(parseContent);
     const checkRef = setInterval(() => {
       if (contentRef.current) {
@@ -76,9 +104,8 @@ export default function Minimap({ contentRef, onHoverStart }: MinimapProps) {
       clearInterval(checkRef);
       observer.disconnect();
     };
-  }, []);
+  }, [currentChapterId]);
 
-  // Track which paragraph is in view
   useEffect(() => {
     const onScroll = () => {
       if (!contentRef.current) return;
@@ -102,7 +129,7 @@ export default function Minimap({ contentRef, onHoverStart }: MinimapProps) {
     return () => window.removeEventListener('scroll', onScroll);
   }, [paragraphs.length]);
 
-  const handleClick = (idx: number) => {
+  const handleParagraphClick = (idx: number) => {
     if (!contentRef.current) return;
     const els = contentRef.current.querySelectorAll('p, blockquote, h1, h2, h3, h4, h5, h6');
     if (els[idx]) {
@@ -110,21 +137,61 @@ export default function Minimap({ contentRef, onHoverStart }: MinimapProps) {
     }
   };
 
-  if (paragraphs.length === 0) return null;
+  if (chapters.length === 0) return null;
 
-  const maxLen = Math.max(...paragraphs.map(p => p.length));
+  const maxLen = paragraphs.length > 0 ? Math.max(...paragraphs.map(p => p.length)) : 1;
 
   return (
     <MinimapContainer onMouseEnter={onHoverStart}>
       <MinimapInner>
-        {paragraphs.map((p, i) => (
-          <MinimapLine
-            key={i}
-            $active={i === activeIdx}
-            $width={Math.round((p.length / maxLen) * 16)}
-            onClick={() => handleClick(i)}
-          />
-        ))}
+        {chapters.map(ch => {
+          const isCurrent = ch.id === currentChapterId;
+          const lines: React.ReactNode[] = [];
+
+          if (isCurrent && paragraphs.length > 0) {
+            paragraphs.forEach((p, i) => {
+              lines.push(
+                <MinimapLine
+                  key={`${ch.id}-p-${i}`}
+                  $active={i === activeIdx}
+                  $width={Math.round((p.length / maxLen) * 16)}
+                  $dim={false}
+                  $thick
+                  onClick={e => {
+                    e.stopPropagation();
+                    handleParagraphClick(i);
+                  }}
+                />,
+              );
+            });
+          } else {
+            const n = Math.max(2, Math.min(12, Math.round((ch.lineCount ?? DEFAULT_OTHER_LINES) / 4)));
+            for (let i = 0; i < n; i++) {
+              lines.push(
+                <MinimapLine
+                  key={`${ch.id}-ph-${i}`}
+                  $active={false}
+                  $width={8}
+                  $dim
+                  $thick={false}
+                />,
+              );
+            }
+          }
+
+          return (
+            <ChapterBlock
+              key={ch.id}
+              $isCurrent={isCurrent}
+              onClick={() => {
+                if (!isCurrent) onChapterChange(ch.id);
+              }}
+              title={ch.title}
+            >
+              {lines}
+            </ChapterBlock>
+          );
+        })}
       </MinimapInner>
     </MinimapContainer>
   );

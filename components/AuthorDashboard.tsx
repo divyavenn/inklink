@@ -9,6 +9,8 @@ import LikesHeatmapView, { HeatmapRange } from './LikesHeatmapView';
 import CommentsView from './CommentsView';
 import VersionTimeline from './VersionTimeline';
 import RetentionView, { RetentionData, InterestSignup } from './RetentionView';
+import AuthorNotesView from './AuthorNotesView';
+import StatsView from './StatsView';
 import { useApi, primeCache } from '@/lib/useApi';
 
 const SURFACE_BASE = '#fcfcfc';
@@ -392,7 +394,7 @@ const FilterSelect = styled.select`
   }
 `;
 
-type ViewType = 'likes' | 'comments' | 'retention';
+type ViewType = 'likes' | 'comments' | 'notes' | 'retention' | 'stats';
 
 interface HeatmapLine {
   lineNumber: number;
@@ -613,7 +615,9 @@ export default function AuthorDashboard({ isProtected = false }: { isProtected?:
             const tabs: { key: ViewType; label: string; w: number; mask: string }[] = [
               { key: 'likes', label: 'Heatmap', w: CORNER_TAB_W, mask: '/corner_tab.svg' },
               { key: 'comments', label: 'Comments & Edits', w: FOLDER_TAB_W, mask: '/folder_tab.svg' },
+              { key: 'notes', label: 'Notes', w: FOLDER_TAB_W, mask: '/folder_tab.svg' },
               { key: 'retention', label: 'Retention', w: FOLDER_TAB_W, mask: '/folder_tab.svg' },
+              { key: 'stats', label: 'Stats', w: FOLDER_TAB_W, mask: '/folder_tab.svg' },
             ];
             const activeIdx = tabs.findIndex(t => t.key === activeView);
             return tabs.map((tab, i) => {
@@ -726,8 +730,17 @@ export default function AuthorDashboard({ isProtected = false }: { isProtected?:
                             onDelete={handleDeleteFeedback}
                           />
                         )}
+                        {activeView === 'notes' && (
+                          <AuthorNotesView
+                            chapterHtml={chapterHtml}
+                            chapterVersionId={chapterVersionId ?? ''}
+                          />
+                        )}
                         {activeView === 'retention' && (
                           <RetentionView data={retentionData} signups={interestSignups} chapterHtml={chapterHtml} />
+                        )}
+                        {activeView === 'stats' && (
+                          <StatsView versionId={chapterVersionId} />
                         )}
                       </ContentTransition>
                     </AnimatePresence>

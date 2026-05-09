@@ -4,7 +4,7 @@ import { feedbackWordPos, wordRangeToCharPos } from '@/lib/db/wordPos';
 
 export async function POST(req: NextRequest) {
   try {
-    const { sessionId, chapterVersionId, originalText, suggestedText, rationale } = await req.json();
+    const { sessionId, chapterVersionId, originalText, suggestedText, rationale, authorNoteId } = await req.json();
 
     if (!sessionId || !chapterVersionId || !originalText || !suggestedText) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -30,8 +30,8 @@ export async function POST(req: NextRequest) {
     }
 
     const [s] = await sql`
-      INSERT INTO suggested_edits (reader_session_id, chapter_version_id, reader_profile_id, reader_group_id, reader_invite_id, original_text, suggested_text, rationale, char_start, char_length, word_start, word_end)
-      VALUES (${sessionId}, ${chapterVersionId}, ${session.reader_profile_id}, ${session.reader_group_id}, ${session.reader_invite_id}, ${originalText}, ${suggestedText}, ${rationale ?? null}, ${charStart}, ${charLength}, ${wordStart}, ${wordEnd})
+      INSERT INTO suggested_edits (reader_session_id, chapter_version_id, reader_profile_id, reader_group_id, reader_invite_id, original_text, suggested_text, rationale, char_start, char_length, word_start, word_end, author_note_id)
+      VALUES (${sessionId}, ${chapterVersionId}, ${session.reader_profile_id}, ${session.reader_group_id}, ${session.reader_invite_id}, ${originalText}, ${suggestedText}, ${rationale ?? null}, ${charStart}, ${charLength}, ${wordStart}, ${wordEnd}, ${authorNoteId ?? null})
       RETURNING id
     `;
 

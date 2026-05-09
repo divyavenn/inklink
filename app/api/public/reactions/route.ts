@@ -4,7 +4,7 @@ import { feedbackWordPos, wordRangeToCharPos } from '@/lib/db/wordPos';
 
 export async function POST(req: NextRequest) {
   try {
-    const { sessionId, chapterVersionId, reaction, selectedText } = await req.json();
+    const { sessionId, chapterVersionId, reaction, selectedText, authorNoteId } = await req.json();
 
     if (!sessionId || !chapterVersionId || !reaction) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -35,8 +35,8 @@ export async function POST(req: NextRequest) {
     }
 
     const [r] = await sql`
-      INSERT INTO feedback_reactions (reader_session_id, chapter_version_id, reader_profile_id, reader_group_id, reader_invite_id, reaction, selected_text, word_start, word_end, char_start, char_length)
-      VALUES (${sessionId}, ${chapterVersionId}, ${session.reader_profile_id}, ${session.reader_group_id}, ${session.reader_invite_id}, ${reaction}, ${selectedText ?? null}, ${wordStart}, ${wordEnd}, ${charStart}, ${charLength})
+      INSERT INTO feedback_reactions (reader_session_id, chapter_version_id, reader_profile_id, reader_group_id, reader_invite_id, reaction, selected_text, word_start, word_end, char_start, char_length, author_note_id)
+      VALUES (${sessionId}, ${chapterVersionId}, ${session.reader_profile_id}, ${session.reader_group_id}, ${session.reader_invite_id}, ${reaction}, ${selectedText ?? null}, ${wordStart}, ${wordEnd}, ${charStart}, ${charLength}, ${authorNoteId ?? null})
       RETURNING id
     `;
 

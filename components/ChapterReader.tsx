@@ -1,6 +1,16 @@
 'use client';
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import {
+  pickPostit,
+  PostitDefs,
+  PostitVisual,
+  PostitTexture,
+  PostitContent as NoteContent,
+  PostitWrapper as AuthorNoteSticky,
+  postitHeightPx,
+  postitPaperBottomPx,
+} from './Postit';
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'motion/react';
 import dynamic from 'next/dynamic';
@@ -66,7 +76,7 @@ const TextColumn = styled.div`
 `;
 
 const MarginColumn = styled.div`
-  width: 200px;
+  width: 260px;
   flex-shrink: 0;
   position: relative;
   align-self: stretch;
@@ -165,11 +175,168 @@ const ChapterContent = styled.div`
   }
   mark:hover { filter: brightness(0.88); }
 
+  sup.fn-ref {
+    cursor: pointer;
+    color: ${BLUE_INK};
+    font-feature-settings: "sups";
+    margin: 0 0.05em;
+    padding: 0 0.1em;
+    border-radius: 2px;
+    transition: background 0.12s ease;
+  }
+  sup.fn-ref::before {
+    content: attr(data-fn-num);
+  }
+  sup.fn-ref:hover {
+    background: rgba(43,87,151,0.10);
+  }
+
+  aside.footnotes {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(26,26,24,0.12);
+    font-size: 0.85rem;
+    color: rgba(26,26,24,0.7);
+    line-height: 1.6;
+  }
+  aside.footnotes ol {
+    padding-left: 1.5rem;
+    margin: 0;
+  }
+  aside.footnotes li {
+    margin-bottom: 0.5rem;
+  }
+  aside.footnotes li[data-active="true"] {
+    color: #1a1a18;
+  }
+
+  /* Active mark stays in DOM (so the toolbar can read its position) but is invisible
+     until the linked postit is hovered. */
+  mark.author-note-active {
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    border-radius: 2px;
+    transition: background 0.12s ease, box-shadow 0.12s ease;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  mark.author-note-active.author-note-hovered {
+    background: rgba(183, 138, 38, 0.28);
+    box-shadow: 0.4em 0 0 rgba(183, 138, 38, 0.18), -0.4em 0 0 rgba(183, 138, 38, 0.18);
+  }
+
   @media (max-width: 768px) {
     -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
   }
 `;
+
+const FootnotePopover = styled(motion.div)`
+  position: fixed;
+  background: rgba(252, 250, 245, 0.98);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(26,26,24,0.12);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(26,26,24,0.10);
+  padding: 0.75rem 1rem;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #2a2a26;
+  max-width: 320px;
+  z-index: 250;
+  pointer-events: none;
+`;
+
+const PIE_PALETTE = ['#b78a26', '#7d6cab', '#3e8e7e', '#c5605d'];
+
+const PostitPoll = styled.div`
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+`;
+
+const PostitPollRow = styled.button<{ $selected: boolean; $color: string; $pct: number }>`
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  padding: 0.18rem 0.4rem;
+  background: ${p => p.$selected ? `rgba(0,0,0,0.07)` : 'transparent'};
+  border-radius: 3px;
+  font-family: 'Figma Hand', var(--font-caveat), 'Caveat', cursive;
+  font-size: 0.95rem;
+  color: #3a2e0e;
+  text-align: left;
+  overflow: hidden;
+  z-index: 1;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: ${p => p.$pct}%;
+    background: ${p => p.$color};
+    opacity: 0.18;
+    z-index: -1;
+    transition: width 0.2s ease;
+  }
+
+  &:hover::before { opacity: 0.28; }
+`;
+
+const PostitCommentStack = styled.div`
+  position: absolute;
+  left: 15%;
+  width: 82%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  pointer-events: none;
+`;
+
+const PostitCommentRow = styled.div`
+  font-family: 'Figma Hand', var(--font-caveat), 'Caveat', cursive;
+  font-size: 1.15rem;
+  line-height: 1.2;
+  color: #2c4f8f;
+  padding: 0.1rem 0.4rem;
+  pointer-events: auto;
+`;
+
+const PostitReplyTextarea = styled.textarea`
+  width: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
+  resize: none;
+  font-family: 'Figma Hand', var(--font-caveat), 'Caveat', cursive;
+  font-size: 1.15rem;
+  line-height: 1.2;
+  color: #2c4f8f;
+  padding: 0;
+  pointer-events: auto;
+
+  &::placeholder { color: rgba(44, 79, 143, 0.5); }
+`;
+
+interface ReaderAuthorNote {
+  id: string;
+  charStart: number;
+  charLength: number;
+  selectedText: string;
+  body: string;
+  pollOptions: string[] | null;
+  pollTallies: number[] | null;
+  myVote: number | null;
+  responseCount: number;
+  textResponseCount: number;
+}
 
 
 const EditHint = styled.div`
@@ -303,35 +470,93 @@ const ShortcutKey = styled.span`
   font-family: var(--font-inter), system-ui, sans-serif;
 `;
 
+const TOOLBAR_BG = '#000';
+const KEYCAP_BG = '#414141';
+const KEYCAP_INNER_BG = 'rgba(99,93,93,0.5)';
+const KEYCAP_INNER_BG_ACTIVE = '#635d5d';
+
+const KeyCap = styled.span<{ $plain?: boolean; $small?: boolean }>`
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  ${p => p.$small
+    ? 'width: 1.4rem; height: 1.4rem;'
+    : p.$plain
+      ? 'min-width: 1.85rem; height: 1.85rem; padding: 0 0.5rem;'
+      : 'width: 1.85rem; height: 1.85rem;'}
+  background: ${KEYCAP_BG};
+  border-radius: 3px;
+  color: #fff;
+  font-family: ${p => p.$plain ? 'var(--font-inter), system-ui, sans-serif' : 'var(--font-playfair), Georgia, serif'};
+  font-size: ${p => p.$small ? '0.62rem' : '0.78rem'};
+  font-style: ${p => p.$plain ? 'normal' : 'italic'};
+  transform: scale(1);
+  transform-origin: center;
+  transition: filter 0.12s ease, transform 0.12s ease;
+  user-select: none;
+  pointer-events: none;
+
+  /* Inner darker panel — always visible (matches Figma 898:22 unselected state) */
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 15%;
+    background: ${KEYCAP_INNER_BG};
+    border-radius: 28.5%;
+    pointer-events: none;
+    z-index: -1;
+    transition: inset 0.12s ease, background 0.12s ease;
+  }
+`;
+
 const MobilePill = styled(motion.div)`
   display: flex;
   position: fixed;
   bottom: 1.5rem;
   left: 50%;
-  background: #1a1a18;
-  border-radius: 24px;
-  padding: 0.35rem;
-  gap: 2px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  background: ${TOOLBAR_BG};
+  border-radius: 6px;
+  padding: 0;
+  gap: 0;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.35);
   z-index: 10000;
-  align-items: center;
+  align-items: stretch;
+  overflow: hidden;
 `;
 
-const PillBtn = styled.button<{ $active?: boolean }>`
-  background: ${p => p.$active ? 'rgba(255,255,255,0.15)' : 'transparent'};
+const PillBtn = styled.button<{ $active?: boolean; $small?: boolean }>`
+  position: relative;
+  width: ${p => p.$small ? '1.95rem' : '2.5rem'};
+  height: ${p => p.$small ? '1.95rem' : '2.5rem'};
+  padding: 0;
+  background: transparent;
   border: none;
-  color: #e8e4dc;
-  font-family: var(--font-inter), system-ui, sans-serif;
-  font-size: 0.72rem;
-  padding: 0.45rem 0.7rem;
-  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  white-space: nowrap;
-  transition-property: background, scale;
-  transition-duration: 0.12s;
-  transition-timing-function: ease;
-  &:hover { background: rgba(255,255,255,0.12); }
-  &:active { scale: 0.96; }
+
+  & > ${KeyCap} {
+    filter: ${p => p.$active ? 'brightness(0.7)' : 'none'};
+    transform: scale(${p => p.$active ? 0.96 : 1});
+    &::after {
+      background: ${p => p.$active ? KEYCAP_INNER_BG_ACTIVE : KEYCAP_INNER_BG};
+      inset: ${p => p.$active ? '17.7%' : '15%'};
+    }
+  }
+
+  &:hover > ${KeyCap},
+  &:focus-visible > ${KeyCap},
+  &:active > ${KeyCap} {
+    filter: brightness(0.7);
+    transform: scale(0.96);
+    &::after {
+      background: ${KEYCAP_INNER_BG_ACTIVE};
+      inset: 17.7%;
+    }
+  }
 `;
 
 const PillInput = styled.input`
@@ -379,38 +604,77 @@ const HintDeleteBtn = styled.button`
 const SelectionToolbar = styled(motion.div)`
   position: fixed;
   display: flex;
-  background: rgba(252, 250, 245, 0.12);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(26,26,24,0.08);
-  border-radius: 4px;
-  padding: 0.25rem;
+  background: transparent;
+  border: none;
+  padding: 0;
   gap: 1px;
   z-index: 10000;
-  align-items: center;
+  align-items: stretch;
+  isolation: isolate;
+
+  /* Toolbar bg is slightly shorter than buttons — buttons stick out top/bottom + sides
+     (matches Figma 898:11; horizontal inset keeps bg from peeking past hovered end keycaps) */
+  &::before {
+    content: '';
+    position: absolute;
+    top: 1.5px;
+    left: 1.5px;
+    right: 1.5px;
+    bottom: 1.5px;
+    background: ${TOOLBAR_BG};
+    border-radius: 3px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.35);
+    z-index: -1;
+  }
 `;
 
-const ToolbarBtn = styled.button<{ $active?: boolean }>`
-  background: ${p => p.$active ? 'rgba(26,26,24,0.08)' : 'transparent'};
-  border: 1px solid ${p => p.$active ? 'rgba(26,26,24,0.15)' : 'transparent'};
-  color: #2a2a26;
-  font-family: var(--font-playfair), Georgia, serif;
-  font-size: 0.72rem;
-  font-style: italic;
-  padding: 0.3rem 0.55rem;
-  border-radius: 3px;
+const ReactionIcon = styled.span<{ $src: string }>`
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  background-color: currentColor;
+  mask-image: url(${p => p.$src});
+  -webkit-mask-image: url(${p => p.$src});
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-position: center;
+`;
+
+const ToolbarBtn = styled.button<{ $active?: boolean; $small?: boolean }>`
+  position: relative;
+  width: ${p => p.$small ? '2.5rem' : '3.125rem'};
+  height: 3.125rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
   cursor: pointer;
-  white-space: nowrap;
-  transition-property: background, border-color, box-shadow;
-  transition-duration: 0.1s;
-  transition-timing-function: ease;
-  &:hover {
-    background: rgba(26,26,24,0.06);
-    border-color: rgba(26,26,24,0.12);
+
+  & > ${KeyCap} {
+    width: 100%;
+    height: 100%;
+    filter: ${p => p.$active ? 'brightness(0.7)' : 'none'};
+    transform: scale(${p => p.$active ? 0.96 : 1});
+    &::after {
+      background: ${p => p.$active ? KEYCAP_INNER_BG_ACTIVE : KEYCAP_INNER_BG};
+      inset: ${p => p.$active ? '17.7%' : '15%'};
+    }
   }
-  &:active {
-    background: rgba(26,26,24,0.1);
-    box-shadow: inset 0 1px 2px rgba(26,26,24,0.08);
+
+  &:hover > ${KeyCap},
+  &:focus-visible > ${KeyCap},
+  &:active > ${KeyCap} {
+    filter: brightness(0.7);
+    transform: scale(0.96);
+    &::after {
+      background: ${KEYCAP_INNER_BG_ACTIVE};
+      inset: 17.7%;
+    }
   }
 `;
 
@@ -590,6 +854,7 @@ interface FeedbackItem {
   anchorY?: number;      // for comment type: margin note position
   suggestedText?: string; // for suggestion type: what the user typed
   side?: 'left' | 'right';
+  authorNoteId?: string | null; // when this feedback is a response to an author note
 }
 
 interface EditingNote {
@@ -625,6 +890,8 @@ function buildHighlightedHtml(
   pending: PendingState | null,
   focusedId: string | null,
   suggestionEdit?: { charStart: number; charLength: number },
+  activeAuthorNote?: { charStart: number; charLength: number } | null,
+  activeAuthorNoteHovered?: boolean,
 ): string {
   if (typeof window === 'undefined') return html;
   const div = document.createElement('div');
@@ -639,6 +906,7 @@ function buildHighlightedHtml(
       suggestedText: item.type === 'suggestion' ? item.suggestedText : undefined,
     })),
     ...(pending ? [{ charStart: pending.charStart, charLength: pending.charLength, cssClass: `highlight-${pending.mode}`, id: focusedId ?? '__pending__', suggestedText: undefined }] : []),
+    ...(activeAuthorNote ? [{ charStart: activeAuthorNote.charStart, charLength: activeAuthorNote.charLength, cssClass: `author-note-active${activeAuthorNoteHovered ? ' author-note-hovered' : ''}`, id: '__authorNoteActive__', suggestedText: undefined }] : []),
   ].sort((a, b) => a.charStart - b.charStart);
 
   for (const item of toRender) {
@@ -826,26 +1094,49 @@ function computeItemHeight(item: { type: string; comment?: string }): number {
 }
 
 function resolveMarginPositions(
-  items: Array<{ id: string; anchorY: number; heightPx: number }>
+  items: Array<{ id: string; anchorY: number; heightPx: number }>,
+  forbidden: Array<{ top: number; bottom: number }> = []
 ): Map<string, number> {
   if (items.length === 0) return new Map();
   const sorted = [...items].sort((a, b) => a.anchorY - b.anchorY);
+  const sortedForbidden = [...forbidden]
+    .filter(f => f.bottom > f.top)
+    .sort((a, b) => a.top - b.top);
 
-  // First pass: place each item at its anchor, pushing down only when overlapping
+  // Push y past any forbidden range that overlaps an item of height h placed at y.
+  // Re-runs because pushing past one range may land in another.
+  function avoidForbidden(y: number, h: number): number {
+    let cur = y;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const f of sortedForbidden) {
+        if (cur < f.bottom && cur + h > f.top) {
+          cur = f.bottom + MARGIN_NOTE_GAP;
+          changed = true;
+        }
+      }
+    }
+    return cur;
+  }
+
+  // First pass: place each item at its anchor (or beyond, dodging forbidden bands)
   const positions: number[] = [];
   let bottomY = 0;
   for (let i = 0; i < sorted.length; i++) {
-    const y = Math.max(Math.max(0, sorted[i].anchorY), bottomY);
+    let y = Math.max(Math.max(0, sorted[i].anchorY), bottomY);
+    y = avoidForbidden(y, sorted[i].heightPx);
     positions.push(y);
     bottomY = y + sorted[i].heightPx + MARGIN_NOTE_GAP;
   }
 
   // Second pass: pull items back up toward their anchors (bottom-up)
-  // This closes gaps left when a cluster of items got pushed down
   for (let i = sorted.length - 1; i >= 0; i--) {
     const minY = i === 0 ? 0 : positions[i - 1] + sorted[i - 1].heightPx + MARGIN_NOTE_GAP;
     const ideal = Math.max(0, sorted[i].anchorY);
-    positions[i] = Math.max(minY, Math.min(positions[i], ideal));
+    let y = Math.max(minY, Math.min(positions[i], ideal));
+    y = avoidForbidden(y, sorted[i].heightPx);
+    positions[i] = y;
   }
 
   const result = new Map<string, number>();
@@ -921,9 +1212,65 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
   const [emailInput, setEmailInput] = useState('');
   const [emailSubmitting, setEmailSubmitting] = useState(false);
   const [emailSubmitted, setEmailSubmitted] = useState(false);
+  const [footnoteHover, setFootnoteHover] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [authorNotes, setAuthorNotes] = useState<ReaderAuthorNote[]>([]);
+  const [activeAuthorNoteId, setActiveAuthorNoteId] = useState<string | null>(null);
+  const [hoveredAuthorNoteId, setHoveredAuthorNoteId] = useState<string | null>(null);
+  const [authorNoteAnchorYs, setAuthorNoteAnchorYs] = useState<Record<string, number>>({});
+  const activeAuthorNote = authorNotes.find(n => n.id === activeAuthorNoteId) ?? null;
+  const activeAuthorNoteRangeRef = useRef<{ charStart: number; charLength: number } | null>(null);
+  activeAuthorNoteRangeRef.current = activeAuthorNote ? { charStart: activeAuthorNote.charStart, charLength: activeAuthorNote.charLength } : null;
   useEffect(() => {
     if (localStorage.getItem('inklink_email_submitted')) setEmailSubmitted(true);
   }, []);
+
+  // Footnote popover: hover over <sup class="fn-ref"> shows the matching definition.
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    const showFor = (target: HTMLElement) => {
+      const fnId = target.dataset.fnId;
+      if (!fnId) return;
+      const def = el.querySelector(`li[data-fn-id="${CSS.escape(fnId)}"]`) as HTMLElement | null;
+      if (!def) return;
+      const rect = target.getBoundingClientRect();
+      setFootnoteHover({
+        text: def.innerHTML,
+        x: rect.left + rect.width / 2,
+        y: rect.top,
+      });
+    };
+
+    const onOver = (e: MouseEvent) => {
+      const t = (e.target as HTMLElement)?.closest('sup.fn-ref') as HTMLElement | null;
+      if (t) showFor(t);
+    };
+    const onOut = (e: MouseEvent) => {
+      const t = (e.target as HTMLElement)?.closest('sup.fn-ref');
+      const related = (e.relatedTarget as HTMLElement)?.closest?.('sup.fn-ref');
+      if (t && t !== related) setFootnoteHover(null);
+    };
+    const onClick = (e: MouseEvent) => {
+      const t = (e.target as HTMLElement)?.closest('sup.fn-ref') as HTMLElement | null;
+      if (!t) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const fnId = t.dataset.fnId;
+      if (!fnId) return;
+      const def = el.querySelector(`li[data-fn-id="${CSS.escape(fnId)}"]`) as HTMLElement | null;
+      if (def) def.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+
+    el.addEventListener('mouseover', onOver);
+    el.addEventListener('mouseout', onOut);
+    el.addEventListener('click', onClick, true);
+    return () => {
+      el.removeEventListener('mouseover', onOver);
+      el.removeEventListener('mouseout', onOut);
+      el.removeEventListener('click', onClick, true);
+    };
+  }, [chapterData?.html]);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const contentRowRef = useRef<HTMLDivElement>(null);
@@ -1156,7 +1503,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     // Re-apply highlights for all matches
     // We need to re-render the HTML first to reset the DOM
     if (chapterData) {
-      contentRef.current.innerHTML = buildHighlightedHtml(chapterData.html, feedbackItems, pending, focusedFeedbackId);
+      contentRef.current.innerHTML = buildHighlightedHtml(chapterData.html, feedbackItems, pending, focusedFeedbackId, undefined, activeAuthorNoteRangeRef.current, hoveredAuthorNoteId !== null && hoveredAuthorNoteId === activeAuthorNoteId);
     }
 
     // Now apply search highlights using charWrap
@@ -1234,12 +1581,64 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     if (!contentRef.current || !chapterData) return;
     if (editMode) return;
     if (searchOpen && searchQuery) return;
-    contentRef.current.innerHTML = buildHighlightedHtml(chapterData.html, feedbackItems, pending, focusedFeedbackId);
+    contentRef.current.innerHTML = buildHighlightedHtml(chapterData.html, feedbackItems, pending, focusedFeedbackId, undefined, activeAuthorNoteRangeRef.current, hoveredAuthorNoteId !== null && hoveredAuthorNoteId === activeAuthorNoteId);
     // Sync external ref for minimap after DOM is populated
     if (contentElRef) {
       (contentElRef as React.MutableRefObject<HTMLDivElement | null>).current = contentRef.current;
     }
-  }, [chapterData, feedbackItems, pending, focusedFeedbackId, editMode, searchOpen, searchQuery]);
+  }, [chapterData, feedbackItems, pending, focusedFeedbackId, editMode, searchOpen, searchQuery, activeAuthorNoteId, hoveredAuthorNoteId]);
+
+  // When a postit becomes active, programmatically "select" its linked text by
+  // setting `pending` (so feedback submissions thread the linkedNoteId) and
+  // `selectionRect` (so the same SelectionToolbar appears anchored to the highlight).
+  useLayoutEffect(() => {
+    if (!activeAuthorNote) {
+      setPending(null);
+      setSelectionRect(null);
+      setFocusedFeedbackId(null);
+      return;
+    }
+    if (!contentRef.current || !contentRowRef.current) return;
+    const mark = contentRef.current.querySelector('mark.author-note-active') as HTMLElement | null;
+    if (!mark) return;
+    const rect = mark.getBoundingClientRect();
+    const marginTop = contentRowRef.current.getBoundingClientRect().top;
+    const anchorY = rect.top - marginTop;
+
+    // If this user has existing feedback (reply/reaction) on this postit, focus that
+    // feedback so the toolbar opens in its mode with text editable — same as clicking
+    // an existing comment/reaction in the chapter. Prefer a comment over a reaction
+    // since the user wants the comment text, not the like icon, by default. If no
+    // existing feedback, default to 'comment' mode so typing immediately starts a reply.
+    const linked = feedbackItemsRef.current.filter(f => f.authorNoteId === activeAuthorNote.id);
+    const existing = linked.find(f => f.type === 'comment') ?? linked[0];
+    if (existing) {
+      setPending({
+        selectedText: '',
+        charStart: existing.charStart,
+        charLength: existing.charLength,
+        mode: existing.type === 'dislike' ? 'dislike' : existing.type === 'like' ? 'like' : 'comment',
+        commentText: existing.type === 'comment' ? (existing.comment ?? '') : '',
+        anchorY,
+        side: 'right',
+      });
+      setFocusedFeedbackId(existing.id);
+    } else {
+      setPending({
+        selectedText: activeAuthorNote.selectedText,
+        charStart: activeAuthorNote.charStart,
+        charLength: activeAuthorNote.charLength,
+        mode: 'comment',
+        commentText: '',
+        anchorY,
+        side: 'right',
+      });
+    }
+    setSelectionRect({ top: rect.top, left: rect.left, width: rect.width, bottom: rect.bottom });
+    // Depend on the id only — refetching author notes mints a new object reference but
+    // shouldn't reopen the toolbar after the user has just submitted a reply.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAuthorNoteId]);
 
   useEffect(() => { fetchChapter(); }, [chapterId]);
 
@@ -1251,6 +1650,54 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
       loadSessionFeedback(chapterData.versionId);
     }
   }, [sessionId]);
+
+  // Fetch author notes for the current chapter version
+  const refetchAuthorNotes = useCallback(async () => {
+    if (!chapterData?.versionId) return;
+    const url = `/api/public/author-notes?chapterVersionId=${chapterData.versionId}${sessionId ? `&sessionId=${sessionId}` : ''}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const j = await res.json();
+      setAuthorNotes(j.notes ?? []);
+    } catch { /* silent */ }
+  }, [chapterData?.versionId, sessionId]);
+
+  useEffect(() => {
+    refetchAuthorNotes();
+  }, [refetchAuthorNotes]);
+
+  // Compute Y-anchor position for each author note based on its char range in the DOM.
+  useLayoutEffect(() => {
+    if (!contentRef.current || authorNotes.length === 0) return;
+    const containerEl = contentRef.current;
+    const containerRect = containerEl.getBoundingClientRect();
+    const positions: Record<string, number> = {};
+
+    for (const note of authorNotes) {
+      // Walk text nodes to find DOM position of charStart
+      let pos = 0;
+      const walker = document.createTreeWalker(containerEl, NodeFilter.SHOW_TEXT);
+      let foundY: number | null = null;
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const t = node as Text;
+        const len = t.data.length;
+        if (pos + len > note.charStart) {
+          const offset = note.charStart - pos;
+          const range = document.createRange();
+          range.setStart(t, Math.min(offset, len));
+          range.setEnd(t, Math.min(offset, len));
+          const rect = range.getBoundingClientRect();
+          foundY = rect.top - containerRect.top;
+          break;
+        }
+        pos += len;
+      }
+      if (foundY !== null) positions[note.id] = foundY;
+    }
+    setAuthorNoteAnchorYs(positions);
+  }, [authorNotes, chapterData]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -1296,6 +1743,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
           type: r.reaction as 'like' | 'dislike',
           charStart: r.char_start,
           charLength: r.char_length,
+          authorNoteId: r.author_note_id ?? null,
         })),
         ...data.comments.map((c: any) => ({
           id: c.id,
@@ -1303,6 +1751,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
           charStart: c.char_start,
           charLength: c.char_length,
           comment: c.body,
+          authorNoteId: c.author_note_id ?? null,
         })),
         ...data.suggestions.map((s: any) => ({
           id: s.id,
@@ -1341,6 +1790,19 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
       }
     }
 
+    // If the pending range falls inside an active author note's range, link the
+    // resulting feedback to that note so it surfaces in the per-note response view.
+    const linkedNoteId = (() => {
+      const active = activeAuthorNoteRangeRef.current;
+      const activeId = activeAuthorNoteId;
+      if (!active || !activeId) return null;
+      const pStart = p.charStart;
+      const pEnd = p.charStart + p.charLength;
+      const aStart = active.charStart;
+      const aEnd = active.charStart + active.charLength;
+      return pStart < aEnd && pEnd > aStart ? activeId : null;
+    })();
+
     const localId = Math.random().toString(36).slice(2);
     const type: FeedbackItem['type'] = p.mode === 'comment' ? 'comment' : p.mode;
 
@@ -1353,6 +1815,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
       comment: p.mode === 'comment' ? p.commentText : undefined,
       anchorY: p.anchorY,
       side: p.side,
+      authorNoteId: linkedNoteId,
     };
     setFeedbackItems(prev => [...prev, newItem]);
     setPending(null);
@@ -1366,10 +1829,10 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
 
       if (p.mode === 'comment') {
         url = '/api/public/comments';
-        body = JSON.stringify({ sessionId, chapterVersionId: cd.versionId, body: p.commentText, selectedText: p.selectedText });
+        body = JSON.stringify({ sessionId, chapterVersionId: cd.versionId, body: p.commentText, selectedText: p.selectedText, authorNoteId: linkedNoteId });
       } else {
         url = '/api/public/reactions';
-        body = JSON.stringify({ sessionId, chapterVersionId: cd.versionId, reaction: p.mode, selectedText: p.selectedText });
+        body = JSON.stringify({ sessionId, chapterVersionId: cd.versionId, reaction: p.mode, selectedText: p.selectedText, authorNoteId: linkedNoteId });
       }
 
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
@@ -1377,13 +1840,14 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
         const data = await res.json();
         // Replace local ID with server ID
         setFeedbackItems(prev => prev.map(item => item.id === localId ? { ...item, id: data.id } : item));
+        if (linkedNoteId) refetchAuthorNotes();
       } else {
         console.error('Feedback save failed:', res.status);
       }
     } catch (err) {
       console.error('Feedback save error:', err);
     }
-  }, [sessionId]);
+  }, [sessionId, activeAuthorNoteId]);
 
   const deleteFeedback = useCallback(async (id: string) => {
     const item = feedbackItemsRef.current.find(f => f.id === id);
@@ -1464,11 +1928,23 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     setFeedbackItems(prev => [...prev, tmpItem]);
     showToast('Edit proposed');
 
+    // Link to active author note if this suggestion's range overlaps it.
+    const linkedNoteId = (() => {
+      const active = activeAuthorNoteRangeRef.current;
+      const activeId = activeAuthorNoteId;
+      if (!active || !activeId) return null;
+      const pStart = charStartHint;
+      const pEnd = charStartHint + originalText.length;
+      const aStart = active.charStart;
+      const aEnd = active.charStart + active.charLength;
+      return pStart < aEnd && pEnd > aStart ? activeId : null;
+    })();
+
     try {
       const res = await fetch('/api/public/suggestions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, chapterVersionId: cd.versionId, originalText, suggestedText }),
+        body: JSON.stringify({ sessionId, chapterVersionId: cd.versionId, originalText, suggestedText, authorNoteId: linkedNoteId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -1479,6 +1955,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
           charStart: data.char_start ?? f.charStart,
           charLength: data.char_length ?? f.charLength,
         } : f));
+        if (linkedNoteId) refetchAuthorNotes();
       } else {
         setFeedbackItems(prev => prev.filter(f => f.id !== localId));
         console.error('Suggestion save failed:', res.status);
@@ -1487,7 +1964,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
       setFeedbackItems(prev => prev.filter(f => f.id !== localId));
       console.error('Suggestion save error:', err);
     }
-  }, [sessionId]);
+  }, [sessionId, activeAuthorNoteId]);
 
   const suggEditMetaRef = useRef(suggEditMeta);
   useEffect(() => { suggEditMetaRef.current = suggEditMeta; }, [suggEditMeta]);
@@ -1757,15 +2234,26 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     return () => observer.disconnect();
   }, [nextChapterId, onNavigate]);
 
-  // Compute margin note positions with collision avoidance (side-based)
-  // Default side to 'right' for items that haven't been assigned yet (before useLayoutEffect runs)
+  // Compute margin note positions with collision avoidance (side-based).
+  // Postit-linked comments are excluded — they render in the per-postit reply stack instead.
   const marginItems = feedbackItems.filter(f =>
-    (f.type === 'comment' || f.type === 'like' || f.type === 'dislike') && f.anchorY !== undefined
+    (f.type === 'comment' || f.type === 'like' || f.type === 'dislike')
+    && f.anchorY !== undefined
+    && !(f.type === 'comment' && f.authorNoteId)
   );
   const leftItems = marginItems.filter(f => f.side === 'left').map(f => ({ id: f.id, anchorY: f.anchorY!, heightPx: computeItemHeight(f) }));
   const rightItems = marginItems.filter(f => f.side !== 'left').map(f => ({ id: f.id, anchorY: f.anchorY!, heightPx: computeItemHeight(f) }));
+  // Postit footprints (right side only) become forbidden zones the placement algorithm dodges.
+  const POSTIT_RENDER_WIDTH_PX = 260; // matches MarginColumn width
+  const postitFootprints = authorNotes
+    .map(n => {
+      const top = authorNoteAnchorYs[n.id];
+      if (top === undefined) return null;
+      return { top, bottom: top + postitHeightPx(pickPostit(n.id), POSTIT_RENDER_WIDTH_PX) };
+    })
+    .filter((f): f is { top: number; bottom: number } => f !== null);
   const leftPositions = resolveMarginPositions(leftItems);
-  const rightPositions = resolveMarginPositions(rightItems);
+  const rightPositions = resolveMarginPositions(rightItems, postitFootprints);
 
 
   // Update anchor positions for all feedback items (comments + likes/dislikes for margin faces)
@@ -1823,6 +2311,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
 
   return (
     <>
+      <PostitDefs />
       <HelpButton ref={helpBtnRef} onClick={() => setShowHelp(true)}>?</HelpButton>
 
       {/* Search bar */}
@@ -1900,7 +2389,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
               ) : (
                 <>
                   <ShortcutRow><span>like / dislike</span><ShortcutKey>tap button</ShortcutKey></ShortcutRow>
-                  <ShortcutRow><span>suggest an edit</span><ShortcutKey>edit</ShortcutKey></ShortcutRow>
+                  <ShortcutRow><span>suggest an edit</span><ShortcutKey>suggest</ShortcutKey></ShortcutRow>
                   <ShortcutRow><span>write a comment</span><ShortcutKey>note</ShortcutKey></ShortcutRow>
                   <ShortcutRow><span>re-open toolbar</span><ShortcutKey>tap highlight</ShortcutKey></ShortcutRow>
                 </>
@@ -1973,16 +2462,38 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
               </MarginNoteEl>
             ))}
             {/* Left-side pending annotation */}
-            {pending && pending.side === 'left' && !focusedFeedbackId && (
+            {pending && pending.side === 'left' && (
               pending.mode === 'comment' ? (
                 <MarginNoteEl
-                  $isPending
                   $side="left"
                   style={{ top: Math.max(0, pending.anchorY) }}
                 >
-                  {pending.commentText || '…'}
+                  <MarginNoteTextarea
+                    autoFocus
+                    placeholder="write a note..."
+                    value={pending.commentText}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setPending(prev => prev ? { ...prev, commentText: val } : prev);
+                      if (pendingRef.current) pendingRef.current = { ...pendingRef.current, commentText: val };
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        submitPendingRef.current();
+                      } else if (e.key === 'Escape') {
+                        if (focusedFeedbackId) {
+                          setPending(null);
+                          setFocusedFeedbackId(null);
+                        } else {
+                          setPending(null);
+                        }
+                      }
+                    }}
+                    rows={3}
+                  />
                 </MarginNoteEl>
-              ) : (
+              ) : !focusedFeedbackId ? (
                 (() => {
                   const faceSeed = `${pending.charStart}_${pending.charLength}`;
                   const t = faceTransform(faceSeed);
@@ -1998,7 +2509,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                     />
                   );
                 })()
-              )
+              ) : null
             )}
           </MarginColumn>
           <TextColumn ref={textColRef}>
@@ -2013,6 +2524,108 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
             )}
           </TextColumn>
           <MarginColumn data-margin-col="true">
+            {/* Author sticky notes (always visible, gold) */}
+            {authorNotes.map(note => {
+              const y = authorNoteAnchorYs[note.id];
+              if (y === undefined) return null;
+              const variant = pickPostit(note.id);
+              const isActive = note.id === activeAuthorNoteId;
+              const pollTotal = note.pollTallies ? note.pollTallies.reduce((a, b) => a + b, 0) : 0;
+              return (
+                <AuthorNoteSticky
+                  key={`an-${note.id}`}
+                  $active={isActive}
+                  $variant={variant}
+                  style={{ top: y }}
+                  onMouseEnter={() => setHoveredAuthorNoteId(note.id)}
+                  onMouseLeave={() => setHoveredAuthorNoteId(prev => prev === note.id ? null : prev)}
+                  onClick={() => {
+                    setActiveAuthorNoteId(prev => prev === note.id ? null : note.id);
+                  }}
+                >
+                  <PostitVisual variant={variant} />
+                  <PostitTexture $variant={variant} />
+                  <NoteContent $variant={variant}>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{note.body}</div>
+                    {note.pollOptions && note.pollTallies && (
+                      <PostitPoll onClick={e => e.stopPropagation()}>
+                        {note.pollOptions.map((opt, i) => {
+                          const n = note.pollTallies![i] ?? 0;
+                          const pct = pollTotal > 0 ? Math.round((n / pollTotal) * 100) : 0;
+                          const selected = note.myVote === i;
+                          return (
+                            <PostitPollRow
+                              key={i}
+                              $selected={selected}
+                              $color={PIE_PALETTE[i % PIE_PALETTE.length]}
+                              $pct={pct}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!sessionId) return;
+                                try {
+                                  await fetch('/api/public/author-notes/poll-vote', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ sessionId, authorNoteId: note.id, choiceIdx: i }),
+                                  });
+                                  refetchAuthorNotes();
+                                } catch { /* silent */ }
+                              }}
+                            >
+                              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt}</span>
+                              <span style={{ marginLeft: '0.4rem', fontSize: '0.8rem' }}>{pct}%</span>
+                            </PostitPollRow>
+                          );
+                        })}
+                      </PostitPoll>
+                    )}
+                  </NoteContent>
+                </AuthorNoteSticky>
+              );
+            })}
+            {/* Postit-linked comments stack directly under each postit, plus a reply
+                textarea when this postit is the active reply target. */}
+            {authorNotes.map(note => {
+              const top = authorNoteAnchorYs[note.id];
+              if (top === undefined) return null;
+              const variant = pickPostit(note.id);
+              const linkedComments = feedbackItems.filter(f => f.type === 'comment' && f.authorNoteId === note.id);
+              const isReplying = activeAuthorNoteId === note.id && pending?.mode === 'comment';
+              // While editing one of this postit's comments, hide it from the row list
+              // so it shows only inside the textarea (avoids duplicate "hi"/"hi").
+              const visibleComments = isReplying && focusedFeedbackId
+                ? linkedComments.filter(c => c.id !== focusedFeedbackId)
+                : linkedComments;
+              if (visibleComments.length === 0 && !isReplying) return null;
+              return (
+                <PostitCommentStack key={`an-comments-${note.id}`} style={{ top: top + postitPaperBottomPx(variant, 260) + 15 }}>
+                  {visibleComments.map(c => (
+                    <PostitCommentRow key={c.id}>{c.comment}</PostitCommentRow>
+                  ))}
+                  {isReplying && (
+                    <PostitReplyTextarea
+                      autoFocus
+                      placeholder="reply..."
+                      value={pending!.commentText}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setPending(prev => prev ? { ...prev, commentText: val } : prev);
+                        if (pendingRef.current) pendingRef.current = { ...pendingRef.current, commentText: val };
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          submitPendingRef.current();
+                        } else if (e.key === 'Escape') {
+                          setPending(null);
+                        }
+                      }}
+                      rows={2}
+                    />
+                  )}
+                </PostitCommentStack>
+              );
+            })}
             {/* Right-side reaction faces (default for items without side) */}
             {marginItems.filter(f => f.side !== 'left' && (f.type === 'like' || f.type === 'dislike')).map(item => {
               const faceSeed = `${item.charStart}_${item.charLength}`;
@@ -2067,17 +2680,40 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                 )}
               </MarginNoteEl>
             ))}
-            {/* Right-side pending annotation */}
-            {pending && pending.side !== 'left' && !focusedFeedbackId && (
+            {/* Right-side pending annotation (skipped when replying to a postit — the
+                reply textarea renders inside the postit's PostitCommentStack instead). */}
+            {pending && pending.side !== 'left' && !activeAuthorNoteId && (
               pending.mode === 'comment' ? (
                 <MarginNoteEl
-                  $isPending
                   $side="right"
                   style={{ top: Math.max(0, pending.anchorY) }}
                 >
-                  {pending.commentText || '…'}
+                  <MarginNoteTextarea
+                    autoFocus
+                    placeholder="write a note..."
+                    value={pending.commentText}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setPending(prev => prev ? { ...prev, commentText: val } : prev);
+                      if (pendingRef.current) pendingRef.current = { ...pendingRef.current, commentText: val };
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        submitPendingRef.current();
+                      } else if (e.key === 'Escape') {
+                        if (focusedFeedbackId) {
+                          setPending(null);
+                          setFocusedFeedbackId(null);
+                        } else {
+                          setPending(null);
+                        }
+                      }
+                    }}
+                    rows={3}
+                  />
                 </MarginNoteEl>
-              ) : (
+              ) : !focusedFeedbackId ? (
                 (() => {
                   const faceSeed = `${pending.charStart}_${pending.charLength}`;
                   const t = faceTransform(faceSeed);
@@ -2093,7 +2729,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                     />
                   );
                 })()
-              )
+              ) : null
             )}
           </MarginColumn>
         </ContentRow>
@@ -2142,7 +2778,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4, transition: { duration: 0.12 } }}
             style={{
-              top: selectionRect.top - 44 > 0 ? selectionRect.top - 44 : selectionRect.bottom + 8,
+              top: selectionRect.top - 60 > 0 ? selectionRect.top - 60 : selectionRect.bottom + 12,
               left: Math.min(window.innerWidth - 260, Math.max(8, selectionRect.left + selectionRect.width / 2 - 120)),
             }}
           >
@@ -2153,7 +2789,8 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                 setPending(p => p ? { ...p, mode: 'like', commentText: '' } : p);
                 submitPendingRef.current();
               }}
-            >good</ToolbarBtn>
+              aria-label="good"
+            ><KeyCap><ReactionIcon $src="/good_react.svg" /></KeyCap></ToolbarBtn>
             <ToolbarBtn
               $active={pending.mode === 'dislike' && pending.commentText.length === 0}
               onClick={() => {
@@ -2161,22 +2798,23 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                 setPending(p => p ? { ...p, mode: 'dislike', commentText: '' } : p);
                 submitPendingRef.current();
               }}
-            >confusing</ToolbarBtn>
+              aria-label="confusing"
+            ><KeyCap><ReactionIcon $src="/not_good_react.svg" /></KeyCap></ToolbarBtn>
             <ToolbarBtn onClick={() => {
               // For focused items, extract original text from DOM since selectedText may be empty
               const originalText = pending.selectedText || (contentRef.current ? extractTextRange(contentRef.current, pending.charStart, pending.charLength) : '');
               if (focusedFeedbackId) deleteFeedback(focusedFeedbackId);
               enterSuggestionModeRef.current(pending.charStart, pending.charLength, originalText);
             }}>
-              edit
+              <KeyCap $plain>suggest</KeyCap>
             </ToolbarBtn>
             <ToolbarBtn onClick={() => {
               setPending(p => p ? { ...p, mode: 'comment' } : p);
-            }}>note</ToolbarBtn>
+            }}><KeyCap $plain>{activeAuthorNoteId ? 'reply' : 'note'}</KeyCap></ToolbarBtn>
             {focusedFeedbackId ? (
-              <ToolbarBtn onClick={() => deleteFeedback(focusedFeedbackId)}>✕</ToolbarBtn>
+              <ToolbarBtn onClick={() => deleteFeedback(focusedFeedbackId)} aria-label="delete"><KeyCap $small><ReactionIcon $src="/delete.left.svg" /></KeyCap></ToolbarBtn>
             ) : (
-              <ToolbarBtn onClick={() => setPending(null)}>✕</ToolbarBtn>
+              <ToolbarBtn onClick={() => setPending(null)} aria-label="dismiss"><KeyCap $small><ReactionIcon $src="/delete.left.svg" /></KeyCap></ToolbarBtn>
             )}
           </SelectionToolbar>
         )}
@@ -2214,8 +2852,8 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                     ? { ...pendingRef.current, mode: 'comment', commentText: mobileCommentText.trim() }
                     : null;
                   submitPendingRef.current();
-                }}>send</PillBtn>
-                <PillBtn onClick={() => { setMobileCommentMode(false); setMobileCommentText(''); }}>✕</PillBtn>
+                }}><KeyCap $plain>send</KeyCap></PillBtn>
+                <PillBtn $small onClick={() => { setMobileCommentMode(false); setMobileCommentText(''); }}><KeyCap $small>✕</KeyCap></PillBtn>
               </>
             ) : (
               <>
@@ -2226,7 +2864,8 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                     setPending(p => p ? { ...p, mode: 'like' } : p);
                     submitPendingRef.current();
                   }}
-                >good</PillBtn>
+                  aria-label="good"
+                ><KeyCap><ReactionIcon $src="/good_react.svg" /></KeyCap></PillBtn>
                 <PillBtn
                   $active={pending.mode === 'dislike'}
                   onClick={() => {
@@ -2234,17 +2873,18 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                     setPending(p => p ? { ...p, mode: 'dislike' } : p);
                     submitPendingRef.current();
                   }}
-                >confusing</PillBtn>
+                  aria-label="confusing"
+                ><KeyCap><ReactionIcon $src="/not_good_react.svg" /></KeyCap></PillBtn>
                 <PillBtn onClick={() => {
                   const originalText = pending.selectedText || (contentRef.current ? extractTextRange(contentRef.current, pending.charStart, pending.charLength) : '');
                   if (focusedFeedbackId) deleteFeedback(focusedFeedbackId);
                   enterSuggestionModeRef.current(pending.charStart, pending.charLength, originalText);
-                }}>edit</PillBtn>
-                <PillBtn onClick={() => { setMobileCommentMode(true); setMobileCommentText(''); }}>note</PillBtn>
+                }}><KeyCap $plain>suggest</KeyCap></PillBtn>
+                <PillBtn onClick={() => { setMobileCommentMode(true); setMobileCommentText(''); }}><KeyCap $plain>{activeAuthorNoteId ? 'reply' : 'note'}</KeyCap></PillBtn>
                 {focusedFeedbackId ? (
-                  <PillBtn onClick={() => deleteFeedback(focusedFeedbackId)}>✕</PillBtn>
+                  <PillBtn $small onClick={() => deleteFeedback(focusedFeedbackId)} aria-label="delete"><KeyCap $small><ReactionIcon $src="/delete.left.svg" /></KeyCap></PillBtn>
                 ) : (
-                  <PillBtn onClick={() => setPending(null)}>✕</PillBtn>
+                  <PillBtn $small onClick={() => setPending(null)} aria-label="dismiss"><KeyCap $small><ReactionIcon $src="/delete.left.svg" /></KeyCap></PillBtn>
                 )}
               </>
             )}
@@ -2292,6 +2932,23 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
           >
             {toastMessage}
           </SuccessToast>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {footnoteHover && (
+          <FootnotePopover
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4, transition: { duration: 0.1 } }}
+            transition={{ duration: 0.15 }}
+            style={{
+              left: Math.max(12, Math.min(window.innerWidth - 332, footnoteHover.x - 160)),
+              top: Math.max(12, footnoteHover.y - 12),
+              transform: 'translateY(-100%)',
+            }}
+            dangerouslySetInnerHTML={{ __html: footnoteHover.text }}
+          />
         )}
       </AnimatePresence>
 

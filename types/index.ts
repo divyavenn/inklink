@@ -6,4 +6,5 @@ export interface Chapter {
   filePath: string;
   sortOrder: number;
   createdAt: string;
+  lineCount?: number;
 }

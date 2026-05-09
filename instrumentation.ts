@@ -15,16 +15,18 @@ export async function register() {
       console.warn('[ingest] DATABASE_URL not set — skipping ingest');
       return;
     }
-    try {
-      const { ensureIngested } = await import('./lib/ingest/run-ingest');
-      const result = await ensureIngested();
-      if (result.alreadyExists) {
-        console.log(`[ingest] commit ${result.documentVersionId.slice(0, 8)} already ingested`);
-      } else {
-        console.log(`[ingest] ingested ${result.chaptersIngested} chapter(s) for commit ${result.documentVersionId.slice(0, 8)}`);
-      }
-    } catch (err) {
-      console.error('[ingest] startup ingest failed:', err);
-    }
+    // Fire-and-forget: don't block server startup on ingest. The session and
+    // versions API routes also call ensureIngested(); the singleton in
+    // run-ingest.ts dedupes so this only runs once per process.
+    import('./lib/ingest/run-ingest')
+      .then(({ ensureIngested }) => ensureIngested())
+      .then(result => {
+        if (result.alreadyExists) {
+          console.log(`[ingest] commit ${result.documentVersionId.slice(0, 8)} already ingested`);
+        } else {
+          console.log(`[ingest] ingested ${result.chaptersIngested} chapter(s) for commit ${result.documentVersionId.slice(0, 8)}`);
+        }
+      })
+      .catch(err => console.error('[ingest] startup ingest failed:', err));
   }
 }

@@ -13,7 +13,12 @@ export async function GET(req: NextRequest) {
          FROM chapter_versions cv
          JOIN document_versions dv ON dv.id = cv.document_version_id
          WHERE cv.chapter_id = c.id
-        ) as last_updated
+        ) as last_updated,
+        (SELECT cv.line_count FROM chapter_versions cv
+         JOIN document_versions dv ON dv.id = cv.document_version_id
+         WHERE cv.chapter_id = c.id
+         ORDER BY dv.deployed_at DESC LIMIT 1
+        ) as "lineCount"
       FROM chapters c
       JOIN works w ON w.id = c.work_id
       WHERE w.slug = ${workSlug}

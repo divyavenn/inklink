@@ -12,6 +12,7 @@
   "dependencies": {
     "@dotlottie/react-player": "^1.6.19",
     "@neondatabase/serverless": "^1.0.2",
+    "compromise": "^14.15.0",
     "framer-motion": "^11.11.17",
     "gray-matter": "^4.0.3",
     "jotai": "^2.18.1",

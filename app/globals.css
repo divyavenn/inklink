@@ -1,3 +1,13 @@
+@font-face {
+  font-family: 'Figma Hand';
+  src: url('/fonts/FigmaHand.woff2') format('woff2'),
+       url('/fonts/FigmaHand.woff') format('woff'),
+       url('/fonts/FigmaHand.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 * {
   box-sizing: border-box;
   padding: 0;

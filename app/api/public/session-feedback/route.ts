@@ -13,13 +13,13 @@ export async function GET(req: NextRequest) {
 
     const [reactions, comments, suggestions] = await Promise.all([
       sql`
-        SELECT id, reaction, char_start, char_length, selected_text
+        SELECT id, reaction, char_start, char_length, selected_text, author_note_id
         FROM feedback_reactions
         WHERE reader_session_id = ${sessionId} AND chapter_version_id = ${chapterVersionId}
           AND char_start IS NOT NULL AND char_length IS NOT NULL
       `,
       sql`
-        SELECT id, body, char_start, char_length, selected_text
+        SELECT id, body, char_start, char_length, selected_text, author_note_id
         FROM feedback_comments
         WHERE reader_session_id = ${sessionId} AND chapter_version_id = ${chapterVersionId}
           AND char_start IS NOT NULL AND char_length IS NOT NULL

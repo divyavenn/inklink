@@ -251,5 +251,59 @@ CREATE TABLE IF NOT EXISTS interest_signups (
   source text,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (work_id, email)
+);
+
+CREATE TABLE IF NOT EXISTS author_notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  chapter_version_id uuid NOT NULL REFERENCES chapter_versions(id),
+  lineage_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  word_start int NOT NULL,
+  word_end int NOT NULL,
+  char_start int NOT NULL,
+  char_length int NOT NULL,
+  selected_text text,
+  body text NOT NULL,
+  poll_options jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (chapter_version_id, lineage_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_author_notes_chapter_version ON author_notes(chapter_version_id);
+CREATE INDEX IF NOT EXISTS idx_author_notes_lineage ON author_notes(lineage_id);
+
+CREATE TABLE IF NOT EXISTS author_note_poll_responses (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  author_note_id uuid NOT NULL REFERENCES author_notes(id) ON DELETE CASCADE,
+  reader_session_id uuid NOT NULL REFERENCES reader_sessions(id),
+  reader_profile_id uuid REFERENCES reader_profiles(id),
+  reader_group_id uuid REFERENCES reader_groups(id),
+  reader_invite_id uuid REFERENCES reader_invites(id),
+  choice_idx int NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (author_note_id, reader_session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_anpr_note ON author_note_poll_responses(author_note_id);
+CREATE INDEX IF NOT EXISTS idx_anpr_session_note ON author_note_poll_responses(reader_session_id, author_note_id);
+
+ALTER TABLE feedback_comments ADD COLUMN IF NOT EXISTS author_note_id uuid REFERENCES author_notes(id) ON DELETE SET NULL;
+ALTER TABLE feedback_reactions ADD COLUMN IF NOT EXISTS author_note_id uuid REFERENCES author_notes(id) ON DELETE SET NULL;
+ALTER TABLE suggested_edits ADD COLUMN IF NOT EXISTS author_note_id uuid REFERENCES author_notes(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_comments_author_note ON feedback_comments(author_note_id);
+CREATE INDEX IF NOT EXISTS idx_reactions_author_note ON feedback_reactions(author_note_id);
+CREATE INDEX IF NOT EXISTS idx_suggested_edits_author_note ON suggested_edits(author_note_id);
+
+ALTER TABLE chapter_versions ADD COLUMN IF NOT EXISTS stats jsonb;
+
+-- Marker table so code-only commits (no chapter change) don't keep retriggering
+-- the full ingest on every server restart. Inserted whenever runIngest sees a
+-- commit, regardless of whether chapter text changed.
+CREATE TABLE IF NOT EXISTS ingested_commits (
+  work_id uuid NOT NULL REFERENCES works(id),
+  commit_sha text NOT NULL,
+  ingested_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (work_id, commit_sha)
 )
 `;
