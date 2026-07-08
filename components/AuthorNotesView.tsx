@@ -4,6 +4,9 @@ import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } fr
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApi, invalidateCache } from '@/lib/useApi';
+import { resolveMarginPositions } from '@/lib/marginLayout';
+import FeedbackSidebar from './FeedbackSidebar';
+import PollOptions, { MAX_POLL_OPTION_CHARS } from './PollOptions';
 import {
   PostitDefs,
   PostitVisual,
@@ -13,13 +16,17 @@ import {
   pickPostit,
   postitHeightPx,
   POSTIT_CONFIGS,
+  type PostitVariant,
 } from './Postit';
 
+const DRAFT_ID = '__draft__';
 const GOLD = '#b78a26';
 const GOLD_BG = 'rgba(183, 138, 38, 0.15)';
 const GOLD_BG_STRONG = 'rgba(183, 138, 38, 0.32)';
 
-const PIE_COLORS = ['#b78a26', '#7d6cab', '#3e8e7e', '#c5605d'];
+// Render width of a postit in the margin column; used to estimate its height for
+// collision avoidance so stacked notes don't overlap.
+const POSTIT_RENDER_WIDTH = 280;
 
 const Layout = styled.div`
   display: flex;
@@ -122,7 +129,6 @@ const PostitFooterBtn = styled.button`
   font-family: 'Figma Hand', var(--font-caveat), 'Caveat', cursive;
   font-size: 0.88rem;
   cursor: pointer;
-  margin-right: 0.3rem;
 
   &:hover { border-color: ${GOLD}; color: ${GOLD}; }
 `;
@@ -137,21 +143,34 @@ const CharCountBadge = styled.div<{ $over: boolean }>`
   pointer-events: none;
 `;
 
-const PostitFooter = styled.div`
+const PostitFooter = styled.div<{ $variant: PostitVariant }>`
   position: absolute;
-  bottom: 0.45rem;
-  left: 8%;
-  right: 8%;
+  left: 0;
+  right: 0;
+  /* Centered, lifted above the paper's bottom edge — the SVG shadow margin below
+     the paper varies per variant, so the inset is computed from paperBox. */
+  bottom: ${p => {
+    const c = POSTIT_CONFIGS[p.$variant];
+    const shadowBelowPct = ((c.vb[1] - (c.paperBox.y + c.paperBox.h)) / c.vb[1]) * 100;
+    return `calc(${shadowBelowPct}% + 0.5rem)`;
+  }};
   display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 0.35rem;
   pointer-events: auto;
 `;
 
-const PostitDeleteBtn = styled.button`
+const PostitDeleteBtn = styled.button<{ $variant: PostitVariant }>`
   position: absolute;
   top: 0.4rem;
-  right: 0.5rem;
+  /* Anchor to the paper's top-right corner, not the wrapper box — the paper
+     doesn't fill the wrapper (the shadow margin varies per variant), so a fixed
+     inset would land the × in the shadow / half off the note. */
+  right: ${p => {
+    const c = POSTIT_CONFIGS[p.$variant];
+    const shadowInsetPct = ((c.vb[0] - (c.paperBox.x + c.paperBox.w)) / c.vb[0]) * 100;
+    return `calc(${shadowInsetPct}% + 0.3rem)`;
+  }};
   background: transparent;
   border: none;
   color: rgba(58, 46, 14, 0.45);
@@ -163,62 +182,6 @@ const PostitDeleteBtn = styled.button`
   &:hover { color: rgba(58, 46, 14, 0.85); }
 `;
 
-const ResponseBlock = styled.div`
-  position: absolute;
-  left: 0;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  font-family: var(--font-inter), system-ui, sans-serif;
-`;
-
-const ResponseSection = styled.div`
-  font-size: 0.78rem;
-  color: rgba(26,26,24,0.7);
-`;
-
-const ResponseSectionLabel = styled.div`
-  font-size: 0.65rem;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(26,26,24,0.45);
-  margin-bottom: 0.3rem;
-`;
-
-const ResponseRow = styled.div`
-  font-size: 0.78rem;
-  padding: 0.35rem 0.5rem;
-  background: rgba(26,26,24,0.04);
-  border-radius: 3px;
-  line-height: 1.4;
-  margin-bottom: 0.25rem;
-`;
-
-const PieWrap = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.4rem 0;
-`;
-
-const PieLegend = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.75rem;
-`;
-
-const Swatch = styled.span<{ $color: string }>`
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: ${p => p.$color};
-  display: inline-block;
-  margin-right: 0.4rem;
-`;
 
 interface AuthorNote {
   id: string;
@@ -247,6 +210,8 @@ interface NoteResponses {
 interface AuthorNotesViewProps {
   chapterHtml: string;
   chapterVersionId: string;
+  /** New notes can only be created on the latest version. */
+  isLatestVersion?: boolean;
 }
 
 interface DraftNote {
@@ -257,10 +222,11 @@ interface DraftNote {
   pollOptions: string[] | null;
 }
 
-export default function AuthorNotesView({ chapterHtml, chapterVersionId }: AuthorNotesViewProps) {
+export default function AuthorNotesView({ chapterHtml, chapterVersionId, isLatestVersion = true }: AuthorNotesViewProps) {
   const textRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const marginRef = useRef<HTMLDivElement>(null);
+  const draftElRef = useRef<HTMLDivElement>(null);
   const notesUrl = chapterVersionId ? `/api/dashboard/author-notes?chapterVersionId=${chapterVersionId}` : null;
   const { data: notesData, mutate: mutateNotes } = useApi<{ notes: AuthorNote[] }>(notesUrl);
   const notes = notesData?.notes ?? [];
@@ -268,7 +234,40 @@ export default function AuthorNotesView({ chapterHtml, chapterVersionId }: Autho
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftNote | null>(null);
   const [noteAnchorYs, setNoteAnchorYs] = useState<Record<string, number>>({});
+  const [noteSides, setNoteSides] = useState<Record<string, 'left' | 'right'>>({});
   const [draftAnchorY, setDraftAnchorY] = useState<number | null>(null);
+  const [draftSide, setDraftSide] = useState<'left' | 'right'>('right');
+
+  const sideOf = (id: string): 'left' | 'right' => noteSides[id] ?? 'right';
+
+  // Resolve final postit tops from their anchor Ys, nudging overlapping notes
+  // apart so stacked notes in the margin don't collide. Collisions resolve per
+  // side — a left-margin note never pushes a right-margin note.
+  const resolvedNoteTops = useMemo(() => {
+    const itemsFor = (side: 'left' | 'right') => {
+      const items = notes
+        .filter(n => noteAnchorYs[n.id] !== undefined && sideOf(n.id) === side)
+        .map(n => ({
+          id: n.id,
+          anchorY: noteAnchorYs[n.id],
+          // Account for poll bars rendered on the note so stacked notes don't overlap.
+          heightPx: postitHeightPx(pickPostit(n.id), POSTIT_RENDER_WIDTH)
+            + (n.pollOptions ? (n.pollOptions.length === 4 ? 2 : n.pollOptions.length) * 30 + 10 : 0),
+        }));
+      // Place the in-progress draft through the same pass, so it sits at its final
+      // (collision-resolved) spot immediately — no jump when it becomes a saved note.
+      if (draft && draftAnchorY !== null && draftSide === side) {
+        const v = pickPostit(draft.charStart + ':' + draft.charLength);
+        items.push({ id: DRAFT_ID, anchorY: draftAnchorY, heightPx: postitHeightPx(v, POSTIT_RENDER_WIDTH) });
+      }
+      return items;
+    };
+    return new Map([
+      ...resolveMarginPositions(itemsFor('left')),
+      ...resolveMarginPositions(itemsFor('right')),
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notes, noteAnchorYs, noteSides, draft, draftAnchorY, draftSide]);
 
   const responsesUrl = activeNoteId ? `/api/dashboard/author-notes/${activeNoteId}/responses` : null;
   const { data: responsesData } = useApi<NoteResponses>(responsesUrl);
@@ -321,10 +320,18 @@ export default function AuthorNotesView({ chapterHtml, chapterVersionId }: Autho
     const margin = marginRef.current;
     if (!margin) return;
     const marginRect = margin.getBoundingClientRect();
+    const textRect = text.getBoundingClientRect();
+    const colCenter = (textRect.left + textRect.right) / 2;
     const positions: Record<string, number> = {};
+    const sides: Record<string, 'left' | 'right'> = {};
     for (const note of notes) {
       const m = text.querySelector(`mark.note-anchor[data-note-id="${note.id}"]`) as HTMLElement | null;
-      if (m) positions[note.id] = m.getBoundingClientRect().top - marginRect.top;
+      if (m) {
+        const r = m.getBoundingClientRect();
+        positions[note.id] = r.top - marginRect.top;
+        // Anchor each note to the closer margin so notes spread across both sides.
+        sides[note.id] = (r.left + r.right) / 2 < colCenter ? 'left' : 'right';
+      }
     }
     setNoteAnchorYs(prev => {
       const prevKeys = Object.keys(prev);
@@ -332,10 +339,18 @@ export default function AuthorNotesView({ chapterHtml, chapterVersionId }: Autho
       if (prevKeys.length === newKeys.length && newKeys.every(k => prev[k] === positions[k])) return prev;
       return positions;
     });
+    setNoteSides(prev => {
+      const prevKeys = Object.keys(prev);
+      const newKeys = Object.keys(sides);
+      if (prevKeys.length === newKeys.length && newKeys.every(k => prev[k] === sides[k])) return prev;
+      return sides;
+    });
     if (draft) {
       const m = text.querySelector('mark.pending-selection[data-draft="true"]') as HTMLElement | null;
-      const y = m ? m.getBoundingClientRect().top - marginRect.top : null;
+      const r = m?.getBoundingClientRect() ?? null;
+      const y = r ? r.top - marginRect.top : null;
       setDraftAnchorY(prev => prev === y ? prev : y);
+      if (r) setDraftSide((r.left + r.right) / 2 < colCenter ? 'left' : 'right');
     } else {
       setDraftAnchorY(prev => prev === null ? prev : null);
     }
@@ -354,10 +369,14 @@ export default function AuthorNotesView({ chapterHtml, chapterVersionId }: Autho
   }, [html]);
 
   // Selecting text in the chapter spawns a draft postit anchored to that range.
+  // Only on the latest version — older versions are read-only for note creation.
+  const isLatestRef = useRef(isLatestVersion);
+  isLatestRef.current = isLatestVersion;
   useEffect(() => {
     const el = textRef.current;
     if (!el) return;
     const onMouseUp = () => {
+      if (!isLatestRef.current) return;
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.rangeCount) return;
       const range = sel.getRangeAt(0);
@@ -379,13 +398,12 @@ export default function AuthorNotesView({ chapterHtml, chapterVersionId }: Autho
 
   const submitDraft = useCallback(async () => {
     if (!draft || !draft.body.trim()) return;
-    const optsClean = draft.pollOptions
+    // Drop an incomplete poll silently (auto-save shouldn't nag): a poll needs
+    // ≥2 filled options to count, capped at 4.
+    const filled = draft.pollOptions
       ? draft.pollOptions.map(o => o.trim()).filter(o => o.length > 0)
-      : null;
-    if (optsClean && (optsClean.length < 2 || optsClean.length > 4)) {
-      alert('Polls need 2 to 4 options.');
-      return;
-    }
+      : [];
+    const optsClean = filled.length >= 2 ? filled.slice(0, 4) : null;
     const res = await fetch('/api/dashboard/author-notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -393,6 +411,10 @@ export default function AuthorNotesView({ chapterHtml, chapterVersionId }: Autho
         chapterVersionId,
         body: draft.body,
         selectedText: draft.selectedText,
+        // Send the exact selection offsets so the note anchors to the instance
+        // the author highlighted, not the first text match in the chapter.
+        charStart: draft.charStart,
+        charLength: draft.charLength,
         pollOptions: optsClean,
       }),
     });
@@ -409,6 +431,19 @@ export default function AuthorNotesView({ chapterHtml, chapterVersionId }: Autho
     }
   }, [draft, chapterVersionId, notesUrl, mutateNotes]);
 
+  // Auto-save the draft when the author clicks anywhere outside it (or selects new
+  // text). Empty drafts are discarded; the × button / Escape cancel explicitly.
+  useEffect(() => {
+    if (!draft) return;
+    const onDown = (e: MouseEvent) => {
+      if (draftElRef.current && draftElRef.current.contains(e.target as Node)) return;
+      if (draft.body.trim()) submitDraft();
+      else setDraft(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [draft, submitDraft]);
+
   const deleteNote = useCallback(async (id: string) => {
     if (!confirm('Delete this note? Reader responses on this version will also be removed.')) return;
     await fetch(`/api/dashboard/author-notes?id=${id}`, { method: 'DELETE' });
@@ -420,199 +455,165 @@ export default function AuthorNotesView({ chapterHtml, chapterVersionId }: Autho
     }
   }, [activeNoteId, notesUrl, mutateNotes]);
 
+  const renderPostit = (note: AuthorNote) => {
+    const top = resolvedNoteTops.get(note.id);
+    if (top === undefined) return null;
+    const variant = pickPostit(note.id);
+    return (
+      <PostitWrapper
+        key={note.id}
+        $variant={variant}
+        $active={note.id === activeNoteId}
+        style={{ top }}
+        onClick={() => setActiveNoteId(prev => prev === note.id ? null : note.id)}
+      >
+        <PostitVisual variant={variant} />
+        <PostitTexture $variant={variant} />
+        <PostitContent $variant={variant}>
+          <div style={{ fontSize: '0.95rem' }}>{note.body}</div>
+          {note.pollOptions && note.pollOptions.length > 0 && (
+            <PollOptions
+              options={note.pollOptions}
+              seed={note.id}
+              tallies={note.pollTallies ?? note.pollOptions.map(() => 0)}
+            />
+          )}
+        </PostitContent>
+        <PostitDeleteBtn
+          $variant={variant}
+          onClick={e => { e.stopPropagation(); deleteNote(note.id); }}
+          title="Delete note"
+        >
+          ×
+        </PostitDeleteBtn>
+      </PostitWrapper>
+    );
+  };
+
+  // Single poll control: first click adds 2 options, each further click adds one,
+  // and it hides once there are 4. Filling the options is up to the author.
+  const addPollOption = () => setDraft(d => {
+    if (!d) return d;
+    if (!d.pollOptions) return { ...d, pollOptions: ['', ''] };
+    if (d.pollOptions.length < 4) return { ...d, pollOptions: [...d.pollOptions, ''] };
+    return d;
+  });
+
+  // Draft postit: appears at the freshly-selected text and lets the author write
+  // inline. Saves on click-away; the × cancels.
+  const renderDraft = () => {
+    if (!draft || draftAnchorY === null) return null;
+    const variant = pickPostit(draft.charStart + ':' + draft.charLength);
+    const c = POSTIT_CONFIGS[variant];
+    const innerStyle = { paddingBottom: '1.6rem' as const };
+    const pollCount = draft.pollOptions?.length ?? 0;
+    return (
+      <AnimatePresence>
+        <motion.div
+          key="draft"
+          ref={draftElRef}
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.18 }}
+          style={{
+            position: 'absolute',
+            left: 0,
+            width: '100%',
+            top: resolvedNoteTops.get(DRAFT_ID) ?? draftAnchorY,
+            aspectRatio: `${c.vb[0]} / ${c.vb[1]}`,
+            isolation: 'isolate' as const,
+          }}
+        >
+          <PostitVisual variant={variant} />
+          <PostitTexture $variant={variant} />
+          <PostitContent $variant={variant} style={innerStyle}>
+            <PostitTextarea
+              autoFocus
+              placeholder="Write your note…"
+              maxLength={MAX_NOTE_CHARS}
+              value={draft.body}
+              onChange={e => setDraft(d => d ? { ...d, body: e.target.value.slice(0, MAX_NOTE_CHARS) } : d)}
+              onKeyDown={e => {
+                if (e.key === 'Escape') setDraft(null);
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitDraft();
+              }}
+            />
+            <CharCountBadge $over={draft.body.length >= MAX_NOTE_CHARS}>
+              {draft.body.length}/{MAX_NOTE_CHARS}
+            </CharCountBadge>
+            {draft.pollOptions && (
+              <PostitPollEditor onClick={e => e.stopPropagation()}>
+                {draft.pollOptions.map((opt, i) => (
+                  <PollEditorInput
+                    key={i}
+                    placeholder={`Option ${i + 1}`}
+                    value={opt}
+                    maxLength={MAX_POLL_OPTION_CHARS}
+                    onChange={e => setDraft(d => {
+                      if (!d?.pollOptions) return d;
+                      const next = [...d.pollOptions];
+                      next[i] = e.target.value.slice(0, MAX_POLL_OPTION_CHARS);
+                      return { ...d, pollOptions: next };
+                    })}
+                  />
+                ))}
+              </PostitPollEditor>
+            )}
+          </PostitContent>
+          {pollCount < 4 && (
+            <PostitFooter $variant={variant}>
+              <PostitFooterBtn onClick={addPollOption}>
+                {pollCount === 0 ? 'poll' : '+ option'}
+              </PostitFooterBtn>
+            </PostitFooter>
+          )}
+          <PostitDeleteBtn $variant={variant} onClick={() => setDraft(null)} title="Cancel">
+            ×
+          </PostitDeleteBtn>
+        </motion.div>
+      </AnimatePresence>
+    );
+  };
+
+  const leftNotes = notes.filter(n => sideOf(n.id) === 'left');
+  const rightNotes = notes.filter(n => sideOf(n.id) === 'right');
+  const activeSide = activeNoteId ? sideOf(activeNoteId) : null;
+
+  // When a note is selected, the Comments & Edits panel for that note fills the
+  // OPPOSITE margin (full height), sliding in.
+  const renderNoteSidebar = (margin: 'left' | 'right') => {
+    if (!activeNoteId || activeSide === margin) return null;
+    return (
+      <div style={{ position: 'sticky', top: '1rem', height: 'calc(100vh - 2rem)', zIndex: 20 }}>
+        <FeedbackSidebar side={margin} responses={responsesData ?? null} onClose={() => setActiveNoteId(null)} />
+      </div>
+    );
+  };
+
   return (
     <Layout ref={layoutRef}>
       <PostitDefs />
+      {/* Left margin — left-anchored notes, plus the feedback sidebar for a
+          selected right-anchored note */}
+      <MarginColumn>
+        {leftNotes.map(renderPostit)}
+        {renderNoteSidebar('left')}
+        {draftSide === 'left' && renderDraft()}
+      </MarginColumn>
       <TextColumn ref={textRef} />
+      {/* Right margin — right-anchored notes, plus the feedback sidebar for a
+          selected left-anchored note */}
       <MarginColumn ref={marginRef}>
-        {/* Existing author notes */}
-        {notes.map(note => {
-          const top = noteAnchorYs[note.id];
-          if (top === undefined) return null;
-          const variant = pickPostit(note.id);
-          return (
-            <PostitWrapper
-              key={note.id}
-              $variant={variant}
-              $active={note.id === activeNoteId}
-              style={{ top }}
-              onClick={() => setActiveNoteId(prev => prev === note.id ? null : note.id)}
-            >
-              <PostitVisual variant={variant} />
-              <PostitTexture $variant={variant} />
-              <PostitContent $variant={variant}>
-                <div style={{ fontSize: '0.95rem' }}>{note.body}</div>
-              </PostitContent>
-              <PostitDeleteBtn
-                onClick={e => { e.stopPropagation(); deleteNote(note.id); }}
-                title="Delete note"
-              >
-                ×
-              </PostitDeleteBtn>
-            </PostitWrapper>
-          );
-        })}
-
-        {/* Inline poll/response visualization for the active note, rendered under its postit */}
-        {activeNoteId && responsesData && (() => {
-          const note = notes.find(n => n.id === activeNoteId);
-          if (!note) return null;
-          const top = noteAnchorYs[note.id];
-          if (top === undefined) return null;
-          const variant = pickPostit(note.id);
-          return (
-            <ResponseBlock
-              key={`resp-${note.id}`}
-              style={{ top: top + postitHeightPx(variant, 280) + 8 }}
-              onClick={e => e.stopPropagation()}
-            >
-              {note.pollOptions && note.pollTallies && (
-                <ResponseSection>
-                  <ResponseSectionLabel>Poll</ResponseSectionLabel>
-                  <PiePollWidget options={note.pollOptions} tallies={note.pollTallies} />
-                </ResponseSection>
-              )}
-              {responsesData.comments.length > 0 && (
-                <ResponseSection>
-                  <ResponseSectionLabel>Comments ({responsesData.comments.length})</ResponseSectionLabel>
-                  {responsesData.comments.map(c => (
-                    <ResponseRow key={c.id}>{c.body}</ResponseRow>
-                  ))}
-                </ResponseSection>
-              )}
-              {responsesData.reactions.length > 0 && (
-                <ResponseSection>
-                  <ResponseSectionLabel>Reactions ({responsesData.reactions.length})</ResponseSectionLabel>
-                  {responsesData.reactions.map(r => (
-                    <ResponseRow key={r.id}>{r.reaction === 'like' ? '👍' : '👎'} {r.reaction}</ResponseRow>
-                  ))}
-                </ResponseSection>
-              )}
-            </ResponseBlock>
-          );
-        })()}
-
-        {/* Draft postit: appears at the freshly-selected text and lets the author write inline */}
-        {draft && draftAnchorY !== null && (() => {
-          const variant = pickPostit(draft.charStart + ':' + draft.charLength);
-          const c = POSTIT_CONFIGS[variant];
-          // Reserve room for footer at the bottom of the postit so it doesn't overlap the textarea.
-          const innerStyle = { paddingBottom: '1.6rem' as const };
-          return (
-            <AnimatePresence>
-              <motion.div
-                key="draft"
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.18 }}
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  width: '100%',
-                  top: draftAnchorY,
-                  aspectRatio: `${c.vb[0]} / ${c.vb[1]}`,
-                  isolation: 'isolate' as const,
-                }}
-              >
-                <PostitVisual variant={variant} />
-                <PostitTexture $variant={variant} />
-                <PostitContent $variant={variant} style={innerStyle}>
-                  <PostitTextarea
-                    autoFocus
-                    placeholder="Write your note…"
-                    maxLength={MAX_NOTE_CHARS}
-                    value={draft.body}
-                    onChange={e => setDraft(d => d ? { ...d, body: e.target.value.slice(0, MAX_NOTE_CHARS) } : d)}
-                    onKeyDown={e => {
-                      if (e.key === 'Escape') setDraft(null);
-                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitDraft();
-                    }}
-                  />
-                  <CharCountBadge $over={draft.body.length >= MAX_NOTE_CHARS}>
-                    {draft.body.length}/{MAX_NOTE_CHARS}
-                  </CharCountBadge>
-                  {draft.pollOptions && (
-                    <PostitPollEditor onClick={e => e.stopPropagation()}>
-                      {draft.pollOptions.map((opt, i) => (
-                        <PollEditorInput
-                          key={i}
-                          placeholder={`Option ${i + 1}`}
-                          value={opt}
-                          onChange={e => setDraft(d => {
-                            if (!d?.pollOptions) return d;
-                            const next = [...d.pollOptions];
-                            next[i] = e.target.value;
-                            return { ...d, pollOptions: next };
-                          })}
-                        />
-                      ))}
-                      {draft.pollOptions.length < 4 && (
-                        <PostitFooterBtn
-                          onClick={() => setDraft(d => d?.pollOptions ? { ...d, pollOptions: [...d.pollOptions, ''] } : d)}
-                          style={{ alignSelf: 'flex-start', marginTop: '0.2rem' }}
-                        >
-                          + option
-                        </PostitFooterBtn>
-                      )}
-                    </PostitPollEditor>
-                  )}
-                </PostitContent>
-                <PostitFooter>
-                  {!draft.pollOptions && (
-                    <PostitFooterBtn onClick={() => setDraft(d => d ? { ...d, pollOptions: ['', ''] } : d)}>
-                      + add poll
-                    </PostitFooterBtn>
-                  )}
-                  <span style={{ flex: 1 }} />
-                  <PostitFooterBtn onClick={() => setDraft(null)}>cancel</PostitFooterBtn>
-                  <PostitFooterBtn
-                    onClick={submitDraft}
-                    disabled={!draft.body.trim()}
-                    style={{ borderStyle: 'solid', background: GOLD, borderColor: GOLD, color: 'white' }}
-                  >
-                    save
-                  </PostitFooterBtn>
-                </PostitFooter>
-              </motion.div>
-            </AnimatePresence>
-          );
-        })()}
+        {rightNotes.map(renderPostit)}
+        {renderNoteSidebar('right')}
+        {draftSide === 'right' && renderDraft()}
       </MarginColumn>
     </Layout>
   );
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function PiePollWidget({ options, tallies }: { options: string[]; tallies: number[] }) {
-  const total = tallies.reduce((a, b) => a + b, 0);
-  if (total === 0) {
-    return <div style={{ fontSize: '0.75rem', color: 'rgba(26,26,24,0.5)' }}>No votes yet.</div>;
-  }
-  let cum = 0;
-  const segments = tallies.map((n, i) => {
-    const start = (cum / total) * 360;
-    cum += n;
-    const end = (cum / total) * 360;
-    return { start, end, color: PIE_COLORS[i % PIE_COLORS.length] };
-  });
-  const gradient = segments.map(s => `${s.color} ${s.start}deg ${s.end}deg`).join(', ');
-  return (
-    <PieWrap>
-      <div style={{ width: 56, height: 56, borderRadius: '50%', background: `conic-gradient(${gradient})`, flexShrink: 0 }} />
-      <PieLegend>
-        {options.map((opt, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
-            <Swatch $color={PIE_COLORS[i % PIE_COLORS.length]} />
-            <span style={{ flex: 1 }}>{opt}</span>
-            <strong>{tallies[i] ?? 0}</strong>
-          </div>
-        ))}
-      </PieLegend>
-    </PieWrap>
-  );
-}
 
 /** Walk text nodes inside `container` and return the char offset of (target, offset). */
 function getCharOffset(container: Node, targetNode: Node, targetOffset: number): number {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, type ReactNode } from 'react';
 import styled from 'styled-components';
 import { motion } from 'framer-motion';
 import AnimateNumber from './AnimateNumber';
@@ -44,7 +44,7 @@ const AnnotatedChapterText = styled(ChapterText)`
   }
 `;
 
-const CommentsPanel = styled.div`
+export const CommentsPanel = styled.div`
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -52,12 +52,12 @@ const CommentsPanel = styled.div`
   background: rgba(26,26,24,0.015);
 `;
 
-const CommentsPanelHeader = styled.div`
+export const CommentsPanelHeader = styled.div`
   padding: 1.25rem 1.25rem 0.75rem;
   border-bottom: 1px solid rgba(26,26,24,0.06);
 `;
 
-const CommentsTitle = styled.h3`
+export const CommentsTitle = styled.h3`
   font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 0.65rem;
   font-weight: 500;
@@ -67,20 +67,20 @@ const CommentsTitle = styled.h3`
   margin: 0;
 `;
 
-const CommentsCount = styled.span`
+export const CommentsCount = styled.span`
   color: rgba(26,26,24,0.35);
   font-size: 0.65rem;
   font-weight: 400;
   margin-left: 0.4rem;
 `;
 
-const CommentsList = styled.div`
+export const CommentsList = styled.div`
   flex: 1;
   overflow-y: auto;
   padding: 0;
 `;
 
-const CommentCard = styled(motion.div)<{ $isHovered: boolean; $isEdit?: boolean }>`
+export const CommentCard = styled(motion.div)<{ $isHovered: boolean; $isEdit?: boolean }>`
   position: relative;
   padding: 1.1rem 1.25rem;
   border-bottom: 1px solid rgba(26,26,24,0.055);
@@ -93,7 +93,7 @@ const CommentCard = styled(motion.div)<{ $isHovered: boolean; $isEdit?: boolean 
   &:hover { background: rgba(26,26,24,0.025); }
 `;
 
-const DeleteBtn = styled.button`
+export const DeleteBtn = styled.button`
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
@@ -119,7 +119,7 @@ const DeleteBtn = styled.button`
   }
 `;
 
-const SnippetText = styled.div`
+export const SnippetText = styled.div`
   font-family: var(--font-playfair), Georgia, serif;
   font-style: italic;
   font-size: 0.82rem;
@@ -128,7 +128,7 @@ const SnippetText = styled.div`
   line-height: 1.5;
 `;
 
-const CommentBody = styled.div`
+export const CommentBody = styled.div`
   font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 0.85rem;
   color: #1a1a18;
@@ -136,7 +136,7 @@ const CommentBody = styled.div`
   margin-bottom: 0.5rem;
 `;
 
-const EditSuggestion = styled.div`
+export const EditSuggestion = styled.div`
   font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 0.82rem;
   color: rgba(26,26,24,0.7);
@@ -146,7 +146,7 @@ const EditSuggestion = styled.div`
   padding-left: 0.75rem;
 `;
 
-const CommentMeta = styled.div`
+export const CommentMeta = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -157,7 +157,7 @@ const CommentMeta = styled.div`
   margin-top: 0.25rem;
 `;
 
-const ReaderBadge = styled.span`
+export const ReaderBadge = styled.span`
   font-size: 0.68rem;
   color: rgba(26,26,24,0.45);
   font-weight: 500;
@@ -165,7 +165,7 @@ const ReaderBadge = styled.span`
 `;
 
 
-const EmptyState = styled.div`
+export const EmptyState = styled.div`
   text-align: center;
   padding: 3rem 1.5rem;
   color: rgba(26,26,24,0.3);
@@ -221,9 +221,18 @@ export interface DashSuggestion {
   reader_name: string | null;
 }
 
-type Item =
+export interface DashReaction {
+  id: string;
+  reaction: string;
+  selected_text: string | null;
+  created_at: string;
+  reader_name: string | null;
+}
+
+export type Item =
   | { kind: 'comment'; data: DashComment }
-  | { kind: 'suggestion'; data: DashSuggestion };
+  | { kind: 'suggestion'; data: DashSuggestion }
+  | { kind: 'reaction'; data: DashReaction };
 
 interface CommentsViewProps {
   chapterHtml: string;
@@ -429,6 +438,148 @@ function charOverlaps(itemStart: number | null, itemLen: number | null, selStart
   return itemStart < selEnd && (itemStart + itemLen) > selStart;
 }
 
+function itemCharStart(item: Item): number | null {
+  return 'char_start' in item.data ? item.data.char_start : null;
+}
+function itemCharLength(item: Item): number | null {
+  return 'char_length' in item.data ? item.data.char_length : null;
+}
+
+/**
+ * The Comments & Edits panel — header + scrollable list of feedback cards.
+ * Shared between the Comments & Edits tab and the per-note feedback sidebar so
+ * both render the exact same panel and cards.
+ */
+export function FeedbackPanel({
+  title = 'Comments & Edits',
+  items,
+  visibleItems = items,
+  hoveredId = null,
+  onHover,
+  onDelete,
+  emptyText = 'No comments or edits yet',
+  emptyFilteredText = 'No feedback on this selection',
+  crossVersionData = null,
+  loadingCrossVersion = false,
+  headerRight,
+}: {
+  title?: string;
+  items: Item[];
+  visibleItems?: Item[];
+  hoveredId?: string | null;
+  onHover?: (id: string | null, isEdit: boolean) => void;
+  onDelete?: (id: string, type: 'comment' | 'suggestion') => void;
+  emptyText?: string;
+  emptyFilteredText?: string;
+  crossVersionData?: CrossVersionEntry[] | null;
+  loadingCrossVersion?: boolean;
+  headerRight?: ReactNode;
+}) {
+  const renderCard = (item: Item, index: number) => {
+    const isEdit = item.kind === 'suggestion';
+    const id = item.data.id;
+    const isHovered = hoveredId === id;
+    const readerName = item.data.reader_name;
+
+    return (
+      <CommentCard
+        key={id}
+        $isHovered={isHovered}
+        $isEdit={isEdit}
+        onMouseEnter={onHover ? () => onHover(id, isEdit) : undefined}
+        onMouseLeave={onHover ? () => onHover(null, isEdit) : undefined}
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: index * 0.04 }}
+      >
+        {item.kind === 'suggestion' ? (
+          <>
+            <SnippetText>&ldquo;{item.data.original_text}&rdquo;</SnippetText>
+            <EditSuggestion>&rarr; &ldquo;{item.data.suggested_text}&rdquo;</EditSuggestion>
+            {item.data.rationale && <CommentBody>{item.data.rationale}</CommentBody>}
+          </>
+        ) : item.kind === 'reaction' ? (
+          <CommentBody>{item.data.reaction === 'like' ? '👍 liked' : '👎 confusing'}</CommentBody>
+        ) : (
+          <>
+            {item.data.selected_text && <SnippetText>&ldquo;{item.data.selected_text}&rdquo;</SnippetText>}
+            <CommentBody>{item.data.body}</CommentBody>
+          </>
+        )}
+        <CommentMeta>
+          <ReaderBadge>{readerName || 'Anonymous'}</ReaderBadge>
+          <span>{new Date(item.data.created_at).toLocaleDateString()}</span>
+        </CommentMeta>
+        {onDelete && item.kind !== 'reaction' && (
+          <DeleteBtn
+            onClick={e => { e.stopPropagation(); onDelete(id, isEdit ? 'suggestion' : 'comment'); }}
+            title="Delete"
+          >
+            ✕
+          </DeleteBtn>
+        )}
+      </CommentCard>
+    );
+  };
+
+  return (
+    <CommentsPanel>
+      <CommentsPanelHeader style={headerRight ? { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } : undefined}>
+        <CommentsTitle>
+          {title}
+          {!crossVersionData && (
+            <CommentsCount>
+              <AnimateNumber transition={{ type: 'spring', bounce: 0, duration: 0.4 }}>{visibleItems.length}</AnimateNumber>
+              {visibleItems.length !== items.length ? <>{' / '}<AnimateNumber transition={{ type: 'spring', bounce: 0, duration: 0.4 }}>{items.length}</AnimateNumber></> : ''}
+            </CommentsCount>
+          )}
+        </CommentsTitle>
+        {headerRight}
+      </CommentsPanelHeader>
+
+      <CommentsList>
+        {crossVersionData !== null ? (
+          loadingCrossVersion ? (
+            <EmptyState>Loading…</EmptyState>
+          ) : crossVersionData.length === 0 ? (
+            <EmptyState>No feedback on this text across any version</EmptyState>
+          ) : (
+            crossVersionData.map(ver => {
+              const verItems: Item[] = [
+                ...ver.comments.map(c => ({ kind: 'comment' as const, data: c })),
+                ...ver.suggestions.map(s => ({ kind: 'suggestion' as const, data: s })),
+              ].sort((a, b) => (itemCharStart(a) ?? Infinity) - (itemCharStart(b) ?? Infinity));
+
+              return (
+                <div key={ver.versionId}>
+                  <VersionSeparator>
+                    <span>v{ver.versionNumber}</span>
+                    <span style={{ opacity: 0.6 }}>{ver.commitSha.slice(0, 7)}</span>
+                    <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, fontSize: '0.65rem' }}>
+                      &ldquo;{ver.commitMessage}&rdquo;
+                    </span>
+                  </VersionSeparator>
+                  {verItems.length === 0 ? (
+                    <NoFeedbackNote>no feedback on this text</NoFeedbackNote>
+                  ) : (
+                    verItems.map((item, index) => renderCard(item, index))
+                  )}
+                </div>
+              );
+            })
+          )
+        ) : items.length === 0 ? (
+          <EmptyState>{emptyText}</EmptyState>
+        ) : visibleItems.length === 0 ? (
+          <EmptyState>{emptyFilteredText}</EmptyState>
+        ) : (
+          visibleItems.map((item, index) => renderCard(item, index))
+        )}
+      </CommentsList>
+    </CommentsPanel>
+  );
+}
+
 export default function CommentsView({ chapterHtml, comments, suggestions, chapterId, chapterVersionId, onDelete }: CommentsViewProps) {
   const [hoveredPanelId, setHoveredPanelId] = useState<string | null>(null);
   const textPanelRef = useRef<HTMLDivElement>(null);
@@ -447,7 +598,7 @@ export default function CommentsView({ chapterHtml, comments, suggestions, chapt
       ...comments.map(c => ({ kind: 'comment' as const, data: c })),
       ...suggestions.map(s => ({ kind: 'suggestion' as const, data: s })),
     ];
-    return all.sort((a, b) => (a.data.char_start ?? Infinity) - (b.data.char_start ?? Infinity));
+    return all.sort((a, b) => (itemCharStart(a) ?? Infinity) - (itemCharStart(b) ?? Infinity));
   }, [comments, suggestions]);
 
   // Filter panel to the mark under cursor / pinned mark (pinned takes priority)
@@ -503,7 +654,7 @@ export default function CommentsView({ chapterHtml, comments, suggestions, chapt
     const selLength = selEnd - selStart;
 
     const overlappingIds = items
-      .filter(item => charOverlaps(item.data.char_start, item.data.char_length, selStart, selEnd))
+      .filter(item => charOverlaps(itemCharStart(item), itemCharLength(item), selStart, selEnd))
       .map(item => item.data.id);
 
     selectionPinRef.current = true;
@@ -534,61 +685,6 @@ export default function CommentsView({ chapterHtml, comments, suggestions, chapt
     }
   };
 
-  const renderCard = (item: Item, index: number) => {
-    const isEdit = item.kind === 'suggestion';
-    const id = item.data.id;
-    const isHovered = hoveredPanelId === id;
-    const readerName = item.data.reader_name;
-
-    return (
-      <CommentCard
-        key={id}
-        $isHovered={isHovered}
-        $isEdit={isEdit}
-        onMouseEnter={() => {
-          setHoveredPanelId(id);
-          if (isEdit) setPreviewSuggId(id);
-        }}
-        onMouseLeave={() => {
-          setHoveredPanelId(null);
-          setPreviewSuggId(null);
-        }}
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: index * 0.04 }}
-      >
-        {isEdit ? (
-          <>
-            <SnippetText>"{(item.data as DashSuggestion).original_text}"</SnippetText>
-            <EditSuggestion>→ "{(item.data as DashSuggestion).suggested_text}"</EditSuggestion>
-            {(item.data as DashSuggestion).rationale && (
-              <CommentBody>{(item.data as DashSuggestion).rationale}</CommentBody>
-            )}
-          </>
-        ) : (
-          <>
-            {(item.data as DashComment).selected_text && (
-              <SnippetText>"{(item.data as DashComment).selected_text}"</SnippetText>
-            )}
-            <CommentBody>{(item.data as DashComment).body}</CommentBody>
-          </>
-        )}
-        <CommentMeta>
-          <ReaderBadge>{readerName || 'Anonymous'}</ReaderBadge>
-          <span>{new Date(item.data.created_at).toLocaleDateString()}</span>
-        </CommentMeta>
-        {onDelete && (
-          <DeleteBtn
-            onClick={e => { e.stopPropagation(); onDelete(id, isEdit ? 'suggestion' : 'comment'); }}
-            title="Delete"
-          >
-            ✕
-          </DeleteBtn>
-        )}
-      </CommentCard>
-    );
-  };
-
   return (
     <Container>
       <TextPanel ref={textPanelRef}>
@@ -601,63 +697,18 @@ export default function CommentsView({ chapterHtml, comments, suggestions, chapt
         />
       </TextPanel>
 
-      <CommentsPanel>
-        <CommentsPanelHeader>
-          <CommentsTitle>
-            Comments & Edits
-            {!crossVersionData && (
-              <CommentsCount>
-                <AnimateNumber transition={{ type: 'spring', bounce: 0, duration: 0.4 }}>{visibleItems.length}</AnimateNumber>
-                {activeIds !== null && visibleItems.length !== items.length ? <>{' / '}<AnimateNumber transition={{ type: 'spring', bounce: 0, duration: 0.4 }}>{items.length}</AnimateNumber></> : ''}
-              </CommentsCount>
-            )}
-          </CommentsTitle>
-        </CommentsPanelHeader>
-
-        <CommentsList>
-          {crossVersionData !== null ? (
-            // Cross-version grouped view (text selection mode)
-            loadingCrossVersion ? (
-              <EmptyState>Loading…</EmptyState>
-            ) : crossVersionData.length === 0 ? (
-              <EmptyState>No feedback on this text across any version</EmptyState>
-            ) : (
-              crossVersionData.map(ver => {
-                const verItems: Item[] = [
-                  ...ver.comments.map(c => ({ kind: 'comment' as const, data: c })),
-                  ...ver.suggestions.map(s => ({ kind: 'suggestion' as const, data: s })),
-                ].sort((a, b) => (a.data.char_start ?? Infinity) - (b.data.char_start ?? Infinity));
-
-                return (
-                  <div key={ver.versionId}>
-                    <VersionSeparator>
-                      <span>v{ver.versionNumber}</span>
-                      <span style={{ opacity: 0.6 }}>{ver.commitSha.slice(0, 7)}</span>
-                      <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, fontSize: '0.65rem' }}>
-                        "{ver.commitMessage}"
-                      </span>
-                    </VersionSeparator>
-                    {verItems.length === 0 ? (
-                      <NoFeedbackNote>no feedback on this text</NoFeedbackNote>
-                    ) : (
-                      verItems.map((item, index) => renderCard(item, index))
-                    )}
-                  </div>
-                );
-              })
-            )
-          ) : (
-            // Normal single-version flat view
-            items.length === 0 ? (
-              <EmptyState>No comments or edits yet</EmptyState>
-            ) : visibleItems.length === 0 ? (
-              <EmptyState>No feedback on this selection</EmptyState>
-            ) : (
-              visibleItems.map((item, index) => renderCard(item, index))
-            )
-          )}
-        </CommentsList>
-      </CommentsPanel>
+      <FeedbackPanel
+        items={items}
+        visibleItems={visibleItems}
+        hoveredId={hoveredPanelId}
+        onHover={(id, isEdit) => {
+          setHoveredPanelId(id);
+          setPreviewSuggId(id && isEdit ? id : null);
+        }}
+        onDelete={onDelete}
+        crossVersionData={crossVersionData}
+        loadingCrossVersion={loadingCrossVersion}
+      />
     </Container>
   );
 }

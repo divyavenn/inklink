@@ -14,6 +14,8 @@ import {
 import styled from 'styled-components';
 import { motion, AnimatePresence } from 'motion/react';
 import dynamic from 'next/dynamic';
+import PollOptions from './PollOptions';
+import { resolveMarginPositions } from '@/lib/marginLayout';
 
 const DotLottiePlayer = dynamic(
   () => import('@dotlottie/react-player').then(m => m.DotLottiePlayer),
@@ -103,6 +105,22 @@ const ChapterContent = styled.div`
   position: relative;
 
   p { margin-bottom: 1.5rem; }
+
+  /* Embedded image/video assets — clickable to leave feedback. */
+  .chapter-asset {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 1.5rem auto;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: outline-color 0.15s ease;
+    outline: 2px solid transparent;
+    outline-offset: 3px;
+  }
+  .chapter-asset:hover {
+    outline-color: rgba(43, 87, 151, 0.4);
+  }
 
   hr {
     border: none;
@@ -250,45 +268,6 @@ const FootnotePopover = styled(motion.div)`
   pointer-events: none;
 `;
 
-const PIE_PALETTE = ['#b78a26', '#7d6cab', '#3e8e7e', '#c5605d'];
-
-const PostitPoll = styled.div`
-  margin-top: 0.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-`;
-
-const PostitPollRow = styled.button<{ $selected: boolean; $color: string; $pct: number }>`
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 100%;
-  border: none;
-  cursor: pointer;
-  padding: 0.18rem 0.4rem;
-  background: ${p => p.$selected ? `rgba(0,0,0,0.07)` : 'transparent'};
-  border-radius: 3px;
-  font-family: 'Figma Hand', var(--font-caveat), 'Caveat', cursive;
-  font-size: 0.95rem;
-  color: #3a2e0e;
-  text-align: left;
-  overflow: hidden;
-  z-index: 1;
-
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    width: ${p => p.$pct}%;
-    background: ${p => p.$color};
-    opacity: 0.18;
-    z-index: -1;
-    transition: width 0.2s ease;
-  }
-
-  &:hover::before { opacity: 0.28; }
-`;
 
 const PostitCommentStack = styled.div`
   position: absolute;
@@ -426,6 +405,66 @@ const HelpButton = styled.button`
   &:active { scale: 0.96; }
 `;
 
+const TocButton = styled.button`
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  height: 28px;
+  padding: 0 0.7rem;
+  border-radius: 14px;
+  border: 1px solid rgba(26,26,24,0.12);
+  background: rgba(252,252,252,0.85);
+  color: rgba(26,26,24,0.45);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  backdrop-filter: blur(4px);
+  transition: color 0.15s ease, border-color 0.15s ease, scale 0.15s ease;
+  &:hover { color: #1a1a18; border-color: rgba(26,26,24,0.3); }
+  &:active { scale: 0.97; }
+`;
+
+const TocPanel = styled(motion.div)`
+  position: fixed;
+  top: 3.1rem;
+  left: 1rem;
+  width: 240px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(26,26,24,0.1);
+  background: rgba(252,252,252,0.97);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.1);
+  backdrop-filter: blur(6px);
+  z-index: 200;
+  font-family: var(--font-inter), system-ui, sans-serif;
+`;
+
+const TocEntry = styled.button<{ $level: number }>`
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1.3;
+  color: rgba(26,26,24,0.7);
+  padding: 0.28rem 0.4rem;
+  padding-left: ${p => 0.4 + (p.$level - 1) * 0.7}rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  &:hover { background: rgba(26,26,24,0.06); color: #1a1a18; }
+`;
+
 const HelpOverlay = styled(motion.div)`
   position: fixed;
   inset: 0;
@@ -484,14 +523,15 @@ const KeyCap = styled.span<{ $plain?: boolean; $small?: boolean }>`
   ${p => p.$small
     ? 'width: 1.4rem; height: 1.4rem;'
     : p.$plain
-      ? 'min-width: 1.85rem; height: 1.85rem; padding: 0 0.5rem;'
-      : 'width: 1.85rem; height: 1.85rem;'}
+      ? 'min-width: 2.2rem; height: 1.85rem; padding: 0 1rem;'
+      : 'width: 2.2rem; height: 1.85rem;'}
   background: ${KEYCAP_BG};
   border-radius: 3px;
   color: #fff;
   font-family: ${p => p.$plain ? 'var(--font-inter), system-ui, sans-serif' : 'var(--font-playfair), Georgia, serif'};
   font-size: ${p => p.$small ? '0.62rem' : '0.78rem'};
   font-style: ${p => p.$plain ? 'normal' : 'italic'};
+  white-space: nowrap;
   transform: scale(1);
   transform-origin: center;
   transition: filter 0.12s ease, transform 0.12s ease;
@@ -526,9 +566,12 @@ const MobilePill = styled(motion.div)`
   overflow: hidden;
 `;
 
-const PillBtn = styled.button<{ $active?: boolean; $small?: boolean }>`
+const PillBtn = styled.button<{ $active?: boolean; $small?: boolean; $plain?: boolean }>`
   position: relative;
-  width: ${p => p.$small ? '1.95rem' : '2.5rem'};
+  /* $plain caps hold a word — size to content so the text fits and the hit
+     area matches the cap, instead of overflowing the square button. */
+  width: ${p => p.$small ? '1.95rem' : p.$plain ? 'auto' : '2.5rem'};
+  ${p => p.$plain ? 'min-width: 2.5rem;' : ''}
   height: ${p => p.$small ? '1.95rem' : '2.5rem'};
   padding: 0;
   background: transparent;
@@ -643,9 +686,12 @@ const ReactionIcon = styled.span<{ $src: string }>`
   -webkit-mask-position: center;
 `;
 
-const ToolbarBtn = styled.button<{ $active?: boolean; $small?: boolean }>`
+const ToolbarBtn = styled.button<{ $active?: boolean; $small?: boolean; $plain?: boolean }>`
   position: relative;
-  width: ${p => p.$small ? '2.5rem' : '3.125rem'};
+  /* $plain caps hold a word ("suggest", "note") — size to content so the text
+     fits entirely, instead of being clamped to the square key width. */
+  width: ${p => p.$small ? '2.5rem' : p.$plain ? 'auto' : '3.125rem'};
+  ${p => p.$plain ? 'min-width: 3.125rem;' : ''}
   height: 3.125rem;
   padding: 0;
   background: transparent;
@@ -656,7 +702,7 @@ const ToolbarBtn = styled.button<{ $active?: boolean; $small?: boolean }>`
   cursor: pointer;
 
   & > ${KeyCap} {
-    width: 100%;
+    width: ${p => p.$plain ? 'auto' : '100%'};
     height: 100%;
     filter: ${p => p.$active ? 'brightness(0.7)' : 'none'};
     transform: scale(${p => p.$active ? 0.96 : 1});
@@ -843,6 +889,7 @@ interface PendingState {
   commentText: string;
   anchorY: number; // px from top of margin column
   side?: 'left' | 'right';
+  assetId?: string | null; // set when feedback targets an embedded image/video asset
 }
 
 interface FeedbackItem {
@@ -1084,66 +1131,12 @@ function findMinimalDiff(original: string, current: string): {
 // Margin layout collision avoidance (unified for faces + comments)
 const MARGIN_LINE_PX = 32;   // approx px per line at 1.4rem Caveat, line-height 1.4
 const MARGIN_CHARS_PER_LINE = 18; // approx chars fitting in margin column
-const MARGIN_NOTE_GAP = 4;   // min gap between adjacent items
 const FACE_HEIGHT_PX = 48;
 
 function computeItemHeight(item: { type: string; comment?: string }): number {
   if (item.type === 'like' || item.type === 'dislike') return FACE_HEIGHT_PX;
   const lines = Math.max(1, Math.ceil((item.comment?.length ?? 3) / MARGIN_CHARS_PER_LINE));
   return lines * MARGIN_LINE_PX;
-}
-
-function resolveMarginPositions(
-  items: Array<{ id: string; anchorY: number; heightPx: number }>,
-  forbidden: Array<{ top: number; bottom: number }> = []
-): Map<string, number> {
-  if (items.length === 0) return new Map();
-  const sorted = [...items].sort((a, b) => a.anchorY - b.anchorY);
-  const sortedForbidden = [...forbidden]
-    .filter(f => f.bottom > f.top)
-    .sort((a, b) => a.top - b.top);
-
-  // Push y past any forbidden range that overlaps an item of height h placed at y.
-  // Re-runs because pushing past one range may land in another.
-  function avoidForbidden(y: number, h: number): number {
-    let cur = y;
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const f of sortedForbidden) {
-        if (cur < f.bottom && cur + h > f.top) {
-          cur = f.bottom + MARGIN_NOTE_GAP;
-          changed = true;
-        }
-      }
-    }
-    return cur;
-  }
-
-  // First pass: place each item at its anchor (or beyond, dodging forbidden bands)
-  const positions: number[] = [];
-  let bottomY = 0;
-  for (let i = 0; i < sorted.length; i++) {
-    let y = Math.max(Math.max(0, sorted[i].anchorY), bottomY);
-    y = avoidForbidden(y, sorted[i].heightPx);
-    positions.push(y);
-    bottomY = y + sorted[i].heightPx + MARGIN_NOTE_GAP;
-  }
-
-  // Second pass: pull items back up toward their anchors (bottom-up)
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    const minY = i === 0 ? 0 : positions[i - 1] + sorted[i - 1].heightPx + MARGIN_NOTE_GAP;
-    const ideal = Math.max(0, sorted[i].anchorY);
-    let y = Math.max(minY, Math.min(positions[i], ideal));
-    y = avoidForbidden(y, sorted[i].heightPx);
-    positions[i] = y;
-  }
-
-  const result = new Map<string, number>();
-  for (let i = 0; i < sorted.length; i++) {
-    result.set(sorted[i].id, positions[i]);
-  }
-  return result;
 }
 
 function countNearby(items: Array<{ anchorY: number }>, anchorY: number): number {
@@ -1205,6 +1198,8 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
   const [mobileCommentMode, setMobileCommentMode] = useState(false);
   const [mobileCommentText, setMobileCommentText] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [tocOpen, setTocOpen] = useState(false);
+  const [tocItems, setTocItems] = useState<{ index: number; text: string; level: number }[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMatches, setSearchMatches] = useState<number[]>([]);
   const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
@@ -1217,6 +1212,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
   const [activeAuthorNoteId, setActiveAuthorNoteId] = useState<string | null>(null);
   const [hoveredAuthorNoteId, setHoveredAuthorNoteId] = useState<string | null>(null);
   const [authorNoteAnchorYs, setAuthorNoteAnchorYs] = useState<Record<string, number>>({});
+  const [authorNoteSides, setAuthorNoteSides] = useState<Record<string, 'left' | 'right'>>({});
   const activeAuthorNote = authorNotes.find(n => n.id === activeAuthorNoteId) ?? null;
   const activeAuthorNoteRangeRef = useRef<{ charStart: number; charLength: number } | null>(null);
   activeAuthorNoteRangeRef.current = activeAuthorNote ? { charStart: activeAuthorNote.charStart, charLength: activeAuthorNote.charLength } : null;
@@ -1307,7 +1303,11 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     let maxLineSeen = 0;
     let activeSeconds = 0;
     let lastTick = Date.now();
-    let isActive = true;
+    // Only accrue reading time while the tab is actually being read — i.e. the
+    // document is visible AND the window has focus. Tab-switch / minimize / other
+    // app focus all pause it.
+    const isFocused = () => document.visibilityState === 'visible' && document.hasFocus();
+    let isActive = isFocused();
     let sent = false; // chapter_completed sent once
 
     const countLines = () => {
@@ -1391,15 +1391,26 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     }, 15000);
 
     const onScroll = () => computeProgress();
-    const onBlur = () => { isActive = false; };
-    const onFocus = () => { isActive = true; lastTick = Date.now(); };
+
+    // Recompute active state on any focus/visibility transition. Reset lastTick
+    // when becoming active so the gap spent away is never counted.
+    const syncActive = () => {
+      const active = isFocused();
+      if (active && !isActive) {
+        isActive = true;
+        lastTick = Date.now();
+      } else if (!active && isActive) {
+        isActive = false;
+      }
+    };
 
     window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('blur', onBlur);
-    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', syncActive);
+    window.addEventListener('focus', syncActive);
 
-    // Flush on page hide (tab close / navigate away)
     const onVisChange = () => {
+      syncActive();
+      // Flush on page hide (tab switch / close / navigate away)
       if (document.visibilityState === 'hidden') {
         computeProgress();
         flush();
@@ -1411,8 +1422,8 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
       clearInterval(tickInterval);
       clearInterval(heartbeatInterval);
       window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('blur', onBlur);
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', syncActive);
+      window.removeEventListener('focus', syncActive);
       document.removeEventListener('visibilitychange', onVisChange);
       computeProgress();
       flush();
@@ -1672,32 +1683,63 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     if (!contentRef.current || authorNotes.length === 0) return;
     const containerEl = contentRef.current;
     const containerRect = containerEl.getBoundingClientRect();
+    const colCenter = (containerRect.left + containerRect.right) / 2;
     const positions: Record<string, number> = {};
+    const sides: Record<string, 'left' | 'right'> = {};
 
     for (const note of authorNotes) {
-      // Walk text nodes to find DOM position of charStart
+      // Walk text nodes to find DOM position covering the note's char range, so we
+      // can both anchor it vertically and pick the closer margin (left/right).
       let pos = 0;
       const walker = document.createTreeWalker(containerEl, NodeFilter.SHOW_TEXT);
       let foundY: number | null = null;
+      let foundX: number | null = null;
       let node: Node | null;
       while ((node = walker.nextNode())) {
         const t = node as Text;
         const len = t.data.length;
         if (pos + len > note.charStart) {
           const offset = note.charStart - pos;
+          const endOffset = Math.min(len, offset + Math.max(1, note.charLength));
           const range = document.createRange();
           range.setStart(t, Math.min(offset, len));
-          range.setEnd(t, Math.min(offset, len));
+          range.setEnd(t, Math.max(Math.min(offset, len), endOffset));
           const rect = range.getBoundingClientRect();
           foundY = rect.top - containerRect.top;
+          foundX = (rect.left + rect.right) / 2;
           break;
         }
         pos += len;
       }
       if (foundY !== null) positions[note.id] = foundY;
+      if (foundX !== null) sides[note.id] = foundX < colCenter ? 'left' : 'right';
     }
     setAuthorNoteAnchorYs(positions);
+    setAuthorNoteSides(sides);
   }, [authorNotes, chapterData]);
+
+  // Build a per-page table of contents from the rendered chapter's heading
+  // structure (h1–h6). Runs after the content innerHTML is set (useEffect fires
+  // after the layout effect that injects it). Items reference headings by index
+  // so they survive innerHTML re-renders (no reliance on persisted element ids).
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) { setTocItems([]); return; }
+    const hs = [...el.querySelectorAll('h1,h2,h3,h4,h5,h6')];
+    setTocItems(hs.map((h, index) => ({
+      index,
+      text: (h.textContent || '').trim(),
+      level: parseInt(h.tagName[1], 10),
+    })));
+  }, [chapterData]);
+
+  const scrollToHeading = (index: number) => {
+    const el = contentRef.current;
+    if (!el) return;
+    const hs = el.querySelectorAll('h1,h2,h3,h4,h5,h6');
+    hs[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTocOpen(false);
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -1829,10 +1871,10 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
 
       if (p.mode === 'comment') {
         url = '/api/public/comments';
-        body = JSON.stringify({ sessionId, chapterVersionId: cd.versionId, body: p.commentText, selectedText: p.selectedText, authorNoteId: linkedNoteId });
+        body = JSON.stringify({ sessionId, chapterVersionId: cd.versionId, body: p.commentText, selectedText: p.selectedText, authorNoteId: linkedNoteId, assetId: p.assetId ?? null, charStart: p.charStart, charLength: p.charLength });
       } else {
         url = '/api/public/reactions';
-        body = JSON.stringify({ sessionId, chapterVersionId: cd.versionId, reaction: p.mode, selectedText: p.selectedText, authorNoteId: linkedNoteId });
+        body = JSON.stringify({ sessionId, chapterVersionId: cd.versionId, reaction: p.mode, selectedText: p.selectedText, authorNoteId: linkedNoteId, assetId: p.assetId ?? null, charStart: p.charStart, charLength: p.charLength });
       }
 
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
@@ -1996,6 +2038,31 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     setFocusedFeedbackId(itemId);
   }, []);
 
+  // Clicking an embedded image/video opens the feedback toolbar anchored to that
+  // asset (no text selection needed). The asset's char offset gives the margin
+  // position; assetId tags the feedback so it's attributed to the asset.
+  const handleAssetClick = useCallback((assetEl: HTMLElement) => {
+    if (!contentRef.current) return;
+    const charStart = getCharOffset(contentRef.current, assetEl, 0);
+    const marginTop = contentRowRef.current?.getBoundingClientRect().top ?? 0;
+    const rect = assetEl.getBoundingClientRect();
+    const textRect = textColRef.current?.getBoundingClientRect();
+    const assetCenter = (rect.left + rect.right) / 2;
+    const colCenter = textRect ? (textRect.left + textRect.right) / 2 : 0;
+    setFocusedFeedbackId(null);
+    setPending({
+      selectedText: '',
+      charStart,
+      charLength: 0,
+      mode: 'like',
+      commentText: '',
+      anchorY: rect.top - marginTop,
+      side: assetCenter < colCenter ? 'left' : 'right',
+      assetId: assetEl.dataset.assetId ?? null,
+    });
+    setSelectionRect({ top: rect.top, left: rect.left, width: rect.width, bottom: rect.bottom });
+  }, []);
+
   // Stable refs for keydown handler
   const submitPendingRef = useRef(submitPending);
   const deleteFeedbackRef = useRef(deleteFeedback);
@@ -2134,6 +2201,13 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
       if (targetEl?.closest('[data-margin-col]')) return;
       if (targetEl?.closest('[data-toolbar]')) return;
 
+      // Click on an embedded image/video → open the asset feedback toolbar
+      const assetEl = targetEl?.closest('.chapter-asset') as HTMLElement | null;
+      if (assetEl && contentRef.current?.contains(assetEl)) {
+        handleAssetClick(assetEl);
+        return;
+      }
+
       const selection = window.getSelection();
 
       // Has a text selection → create pending
@@ -2234,26 +2308,44 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     return () => observer.disconnect();
   }, [nextChapterId, onNavigate]);
 
-  // Compute margin note positions with collision avoidance (side-based).
-  // Postit-linked comments are excluded — they render in the per-postit reply stack instead.
+  // Unified margin layout: author-note postits, comments, and reactions all flow
+  // through a single resolveMarginPositions pass per side, so nothing overlaps and
+  // the placement logic lives in one place (lib/marginLayout). Postit-linked
+  // comments are excluded — they render in the per-postit reply stack instead.
+  const POSTIT_RENDER_WIDTH_PX = 260; // matches MarginColumn width
+  const noteSideOf = (id: string): 'left' | 'right' => authorNoteSides[id] ?? 'right';
+  const postitItemHeight = (n: ReaderAuthorNote) =>
+    postitHeightPx(pickPostit(n.id), POSTIT_RENDER_WIDTH_PX)
+    + (n.pollOptions ? (n.pollOptions.length === 4 ? 2 : n.pollOptions.length) * 30 + 10 : 0);
+
   const marginItems = feedbackItems.filter(f =>
     (f.type === 'comment' || f.type === 'like' || f.type === 'dislike')
     && f.anchorY !== undefined
     && !(f.type === 'comment' && f.authorNoteId)
   );
-  const leftItems = marginItems.filter(f => f.side === 'left').map(f => ({ id: f.id, anchorY: f.anchorY!, heightPx: computeItemHeight(f) }));
-  const rightItems = marginItems.filter(f => f.side !== 'left').map(f => ({ id: f.id, anchorY: f.anchorY!, heightPx: computeItemHeight(f) }));
-  // Postit footprints (right side only) become forbidden zones the placement algorithm dodges.
-  const POSTIT_RENDER_WIDTH_PX = 260; // matches MarginColumn width
-  const postitFootprints = authorNotes
-    .map(n => {
-      const top = authorNoteAnchorYs[n.id];
-      if (top === undefined) return null;
-      return { top, bottom: top + postitHeightPx(pickPostit(n.id), POSTIT_RENDER_WIDTH_PX) };
-    })
-    .filter((f): f is { top: number; bottom: number } => f !== null);
-  const leftPositions = resolveMarginPositions(leftItems);
-  const rightPositions = resolveMarginPositions(rightItems, postitFootprints);
+  const marginItemsForSide = (side: 'left' | 'right') => {
+    const postits = authorNotes
+      .filter(n => authorNoteAnchorYs[n.id] !== undefined && noteSideOf(n.id) === side)
+      .map(n => ({ id: n.id, anchorY: authorNoteAnchorYs[n.id], heightPx: postitItemHeight(n) }));
+    const feedback = marginItems
+      .filter(f => (f.side === 'left' ? 'left' : 'right') === side)
+      .map(f => ({ id: f.id, anchorY: f.anchorY!, heightPx: computeItemHeight(f) }));
+    const items = [...postits, ...feedback];
+    // Place the in-progress annotation through the same pass so it appears at its
+    // final (collision-resolved) spot — no jump when it becomes a saved item.
+    if (pending && (pending.side ?? 'right') === side && !activeAuthorNoteId) {
+      items.push({ id: '__pending__', anchorY: Math.max(0, pending.anchorY), heightPx: computeItemHeight({ type: pending.mode, comment: pending.commentText }) });
+    }
+    return items;
+  };
+  const leftPositions = resolveMarginPositions(marginItemsForSide('left'));
+  const rightPositions = resolveMarginPositions(marginItemsForSide('right'));
+  // Resolved top for any margin item (postit or feedback), by its side.
+  const positionsFor = (side: 'left' | 'right') => side === 'left' ? leftPositions : rightPositions;
+  // Final placement for the in-progress annotation (resolved among the other items).
+  const pendingTop = pending
+    ? (positionsFor(pending.side ?? 'right').get('__pending__') ?? Math.max(0, pending.anchorY))
+    : 0;
 
 
   // Update anchor positions for all feedback items (comments + likes/dislikes for margin faces)
@@ -2309,10 +2401,122 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
     );
   }
 
+  // A single author postit. Rendered into whichever margin the note is anchored to
+  // (left or right) — the postit fills its column, so the same markup works on both.
+  const renderAuthorPostit = (note: ReaderAuthorNote) => {
+    if (authorNoteAnchorYs[note.id] === undefined) return null;
+    const y = positionsFor(noteSideOf(note.id)).get(note.id) ?? authorNoteAnchorYs[note.id];
+    const variant = pickPostit(note.id);
+    const isActive = note.id === activeAuthorNoteId;
+    return (
+      <AuthorNoteSticky
+        key={`an-${note.id}`}
+        $active={isActive}
+        $variant={variant}
+        style={{ top: y }}
+        onMouseEnter={() => setHoveredAuthorNoteId(note.id)}
+        onMouseLeave={() => setHoveredAuthorNoteId(prev => prev === note.id ? null : prev)}
+        onClick={() => {
+          setActiveAuthorNoteId(prev => prev === note.id ? null : note.id);
+        }}
+      >
+        <PostitVisual variant={variant} />
+        <PostitTexture $variant={variant} />
+        <NoteContent $variant={variant}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{note.body}</div>
+          {note.pollOptions && note.pollOptions.length > 0 && (
+            <PollOptions
+              options={note.pollOptions}
+              seed={note.id}
+              selectedIdx={note.myVote ?? null}
+              onVote={async (i) => {
+                if (!sessionId) return;
+                try {
+                  await fetch('/api/public/author-notes/poll-vote', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId, authorNoteId: note.id, choiceIdx: i }),
+                  });
+                  refetchAuthorNotes();
+                } catch { /* silent */ }
+              }}
+            />
+          )}
+        </NoteContent>
+      </AuthorNoteSticky>
+    );
+  };
+
+  // The linked-comment stack + reply textarea that hangs under a postit.
+  const renderPostitCommentStack = (note: ReaderAuthorNote) => {
+    if (authorNoteAnchorYs[note.id] === undefined) return null;
+    const top = positionsFor(noteSideOf(note.id)).get(note.id) ?? authorNoteAnchorYs[note.id];
+    const variant = pickPostit(note.id);
+    const linkedComments = feedbackItems.filter(f => f.type === 'comment' && f.authorNoteId === note.id);
+    const isReplying = activeAuthorNoteId === note.id && pending?.mode === 'comment';
+    const visibleComments = isReplying && focusedFeedbackId
+      ? linkedComments.filter(c => c.id !== focusedFeedbackId)
+      : linkedComments;
+    if (visibleComments.length === 0 && !isReplying) return null;
+    return (
+      <PostitCommentStack key={`an-comments-${note.id}`} style={{ top: top + postitPaperBottomPx(variant, 260) + 15 }}>
+        {visibleComments.map(c => (
+          <PostitCommentRow key={c.id}>{c.comment}</PostitCommentRow>
+        ))}
+        {isReplying && (
+          <PostitReplyTextarea
+            autoFocus
+            placeholder="reply..."
+            value={pending!.commentText}
+            onChange={e => {
+              const val = e.target.value;
+              setPending(prev => prev ? { ...prev, commentText: val } : prev);
+              if (pendingRef.current) pendingRef.current = { ...pendingRef.current, commentText: val };
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitPendingRef.current();
+              } else if (e.key === 'Escape') {
+                setPending(null);
+              }
+            }}
+            rows={2}
+          />
+        )}
+      </PostitCommentStack>
+    );
+  };
+
+  const leftNotes = authorNotes.filter(n => (authorNoteSides[n.id] ?? 'right') === 'left');
+  const rightNotes = authorNotes.filter(n => (authorNoteSides[n.id] ?? 'right') === 'right');
+
   return (
     <>
       <PostitDefs />
       <HelpButton ref={helpBtnRef} onClick={() => setShowHelp(true)}>?</HelpButton>
+
+      {/* Per-page table of contents (from the chapter's heading structure) */}
+      {tocItems.length > 0 && (
+        <>
+          <TocButton onClick={() => setTocOpen(o => !o)} aria-expanded={tocOpen}>☰ Contents</TocButton>
+          <AnimatePresence>
+            {tocOpen && (
+              <TocPanel
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6, transition: { duration: 0.12 } }}
+              >
+                {tocItems.map(item => (
+                  <TocEntry key={item.index} $level={item.level} onClick={() => scrollToHeading(item.index)} title={item.text}>
+                    {item.text}
+                  </TocEntry>
+                ))}
+              </TocPanel>
+            )}
+          </AnimatePresence>
+        </>
+      )}
 
       {/* Search bar */}
       <AnimatePresence>
@@ -2407,6 +2611,9 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
       >
         <ContentRow ref={contentRowRef}>
           <MarginColumn data-margin-col="true">
+            {/* Author sticky notes (always visible, gold) — left-anchored notes */}
+            {leftNotes.map(renderAuthorPostit)}
+            {leftNotes.map(renderPostitCommentStack)}
             {/* Left-side reaction faces */}
             {marginItems.filter(f => f.side === 'left' && (f.type === 'like' || f.type === 'dislike')).map(item => {
               const faceSeed = `${item.charStart}_${item.charLength}`;
@@ -2466,7 +2673,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
               pending.mode === 'comment' ? (
                 <MarginNoteEl
                   $side="left"
-                  style={{ top: Math.max(0, pending.anchorY) }}
+                  style={{ top: pendingTop }}
                 >
                   <MarginNoteTextarea
                     autoFocus
@@ -2502,7 +2709,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                       src={pickFace(pending.mode as 'like' | 'dislike')}
                       alt={pending.mode === 'like' ? '😊' : '😕'}
                       style={{
-                        top: Math.max(0, pending.anchorY) + t.offsetY,
+                        top: pendingTop + t.offsetY,
                         right: `calc(-2.75rem + ${t.offsetX}px)`,
                         transform: `rotate(${t.rotation}deg)`,
                       }}
@@ -2524,108 +2731,11 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
             )}
           </TextColumn>
           <MarginColumn data-margin-col="true">
-            {/* Author sticky notes (always visible, gold) */}
-            {authorNotes.map(note => {
-              const y = authorNoteAnchorYs[note.id];
-              if (y === undefined) return null;
-              const variant = pickPostit(note.id);
-              const isActive = note.id === activeAuthorNoteId;
-              const pollTotal = note.pollTallies ? note.pollTallies.reduce((a, b) => a + b, 0) : 0;
-              return (
-                <AuthorNoteSticky
-                  key={`an-${note.id}`}
-                  $active={isActive}
-                  $variant={variant}
-                  style={{ top: y }}
-                  onMouseEnter={() => setHoveredAuthorNoteId(note.id)}
-                  onMouseLeave={() => setHoveredAuthorNoteId(prev => prev === note.id ? null : prev)}
-                  onClick={() => {
-                    setActiveAuthorNoteId(prev => prev === note.id ? null : note.id);
-                  }}
-                >
-                  <PostitVisual variant={variant} />
-                  <PostitTexture $variant={variant} />
-                  <NoteContent $variant={variant}>
-                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{note.body}</div>
-                    {note.pollOptions && note.pollTallies && (
-                      <PostitPoll onClick={e => e.stopPropagation()}>
-                        {note.pollOptions.map((opt, i) => {
-                          const n = note.pollTallies![i] ?? 0;
-                          const pct = pollTotal > 0 ? Math.round((n / pollTotal) * 100) : 0;
-                          const selected = note.myVote === i;
-                          return (
-                            <PostitPollRow
-                              key={i}
-                              $selected={selected}
-                              $color={PIE_PALETTE[i % PIE_PALETTE.length]}
-                              $pct={pct}
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                if (!sessionId) return;
-                                try {
-                                  await fetch('/api/public/author-notes/poll-vote', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ sessionId, authorNoteId: note.id, choiceIdx: i }),
-                                  });
-                                  refetchAuthorNotes();
-                                } catch { /* silent */ }
-                              }}
-                            >
-                              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt}</span>
-                              <span style={{ marginLeft: '0.4rem', fontSize: '0.8rem' }}>{pct}%</span>
-                            </PostitPollRow>
-                          );
-                        })}
-                      </PostitPoll>
-                    )}
-                  </NoteContent>
-                </AuthorNoteSticky>
-              );
-            })}
+            {/* Author sticky notes (always visible, gold) — right-anchored notes */}
+            {rightNotes.map(renderAuthorPostit)}
             {/* Postit-linked comments stack directly under each postit, plus a reply
                 textarea when this postit is the active reply target. */}
-            {authorNotes.map(note => {
-              const top = authorNoteAnchorYs[note.id];
-              if (top === undefined) return null;
-              const variant = pickPostit(note.id);
-              const linkedComments = feedbackItems.filter(f => f.type === 'comment' && f.authorNoteId === note.id);
-              const isReplying = activeAuthorNoteId === note.id && pending?.mode === 'comment';
-              // While editing one of this postit's comments, hide it from the row list
-              // so it shows only inside the textarea (avoids duplicate "hi"/"hi").
-              const visibleComments = isReplying && focusedFeedbackId
-                ? linkedComments.filter(c => c.id !== focusedFeedbackId)
-                : linkedComments;
-              if (visibleComments.length === 0 && !isReplying) return null;
-              return (
-                <PostitCommentStack key={`an-comments-${note.id}`} style={{ top: top + postitPaperBottomPx(variant, 260) + 15 }}>
-                  {visibleComments.map(c => (
-                    <PostitCommentRow key={c.id}>{c.comment}</PostitCommentRow>
-                  ))}
-                  {isReplying && (
-                    <PostitReplyTextarea
-                      autoFocus
-                      placeholder="reply..."
-                      value={pending!.commentText}
-                      onChange={e => {
-                        const val = e.target.value;
-                        setPending(prev => prev ? { ...prev, commentText: val } : prev);
-                        if (pendingRef.current) pendingRef.current = { ...pendingRef.current, commentText: val };
-                      }}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          submitPendingRef.current();
-                        } else if (e.key === 'Escape') {
-                          setPending(null);
-                        }
-                      }}
-                      rows={2}
-                    />
-                  )}
-                </PostitCommentStack>
-              );
-            })}
+            {rightNotes.map(renderPostitCommentStack)}
             {/* Right-side reaction faces (default for items without side) */}
             {marginItems.filter(f => f.side !== 'left' && (f.type === 'like' || f.type === 'dislike')).map(item => {
               const faceSeed = `${item.charStart}_${item.charLength}`;
@@ -2686,7 +2796,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
               pending.mode === 'comment' ? (
                 <MarginNoteEl
                   $side="right"
-                  style={{ top: Math.max(0, pending.anchorY) }}
+                  style={{ top: pendingTop }}
                 >
                   <MarginNoteTextarea
                     autoFocus
@@ -2722,7 +2832,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
                       src={pickFace(pending.mode as 'like' | 'dislike')}
                       alt={pending.mode === 'like' ? '😊' : '😕'}
                       style={{
-                        top: Math.max(0, pending.anchorY) + t.offsetY,
+                        top: pendingTop + t.offsetY,
                         left: `calc(-2.75rem + ${t.offsetX}px)`,
                         transform: `rotate(${t.rotation}deg)`,
                       }}
@@ -2800,7 +2910,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
               }}
               aria-label="confusing"
             ><KeyCap><ReactionIcon $src="/not_good_react.svg" /></KeyCap></ToolbarBtn>
-            <ToolbarBtn onClick={() => {
+            <ToolbarBtn $plain onClick={() => {
               // For focused items, extract original text from DOM since selectedText may be empty
               const originalText = pending.selectedText || (contentRef.current ? extractTextRange(contentRef.current, pending.charStart, pending.charLength) : '');
               if (focusedFeedbackId) deleteFeedback(focusedFeedbackId);
@@ -2808,7 +2918,7 @@ export default function ChapterReader({ chapterId, sessionId, workId, prefetched
             }}>
               <KeyCap $plain>suggest</KeyCap>
             </ToolbarBtn>
-            <ToolbarBtn onClick={() => {
+            <ToolbarBtn $plain onClick={() => {
               setPending(p => p ? { ...p, mode: 'comment' } : p);
             }}><KeyCap $plain>{activeAuthorNoteId ? 'reply' : 'note'}</KeyCap></ToolbarBtn>
             {focusedFeedbackId ? (

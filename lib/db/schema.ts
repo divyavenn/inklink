@@ -295,6 +295,12 @@ CREATE INDEX IF NOT EXISTS idx_comments_author_note ON feedback_comments(author_
 CREATE INDEX IF NOT EXISTS idx_reactions_author_note ON feedback_reactions(author_note_id);
 CREATE INDEX IF NOT EXISTS idx_suggested_edits_author_note ON suggested_edits(author_note_id);
 
+-- Feedback anchored to an embedded image/video asset (reader clicked the asset
+-- instead of highlighting text). NULL for ordinary text-anchored feedback.
+ALTER TABLE feedback_comments ADD COLUMN IF NOT EXISTS asset_id text;
+ALTER TABLE feedback_reactions ADD COLUMN IF NOT EXISTS asset_id text;
+ALTER TABLE suggested_edits ADD COLUMN IF NOT EXISTS asset_id text;
+
 ALTER TABLE chapter_versions ADD COLUMN IF NOT EXISTS stats jsonb;
 
 -- Marker table so code-only commits (no chapter change) don't keep retriggering

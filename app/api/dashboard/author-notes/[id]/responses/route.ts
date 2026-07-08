@@ -16,6 +16,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const { id } = await ctx.params;
 
+  // Anchor range of the note. Feedback "for the note" = feedback explicitly
+  // linked to it (author_note_id) OR feedback whose own char range overlaps the
+  // note's text. Most reader feedback isn't explicitly linked (linking only
+  // happens when the note is active as the reader responds), so overlap is what
+  // makes the note's text-level responses show up.
+  const [note] = await sql`
+    SELECT chapter_version_id, char_start, char_length
+    FROM author_notes WHERE id = ${id}
+  `;
+  if (!note) return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+  const cv = note.chapter_version_id as string;
+  const nStart = note.char_start as number;
+  const nEnd = (note.char_start as number) + (note.char_length as number);
+
   const [comments, reactions, suggestions, pollVotes] = await Promise.all([
     sql`
       SELECT fc.id, fc.body, fc.selected_text, fc.created_at,
@@ -24,6 +38,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       JOIN reader_sessions rs ON rs.id = fc.reader_session_id
       LEFT JOIN reader_profiles rp ON rp.id = fc.reader_profile_id
       WHERE fc.author_note_id = ${id}
+         OR (fc.chapter_version_id = ${cv} AND fc.char_start IS NOT NULL
+             AND fc.char_start < ${nEnd} AND fc.char_start + COALESCE(fc.char_length, 0) > ${nStart})
       ORDER BY fc.created_at DESC
     `,
     sql`
@@ -33,6 +49,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       JOIN reader_sessions rs ON rs.id = fr.reader_session_id
       LEFT JOIN reader_profiles rp ON rp.id = fr.reader_profile_id
       WHERE fr.author_note_id = ${id}
+         OR (fr.chapter_version_id = ${cv} AND fr.char_start IS NOT NULL
+             AND fr.char_start < ${nEnd} AND fr.char_start + COALESCE(fr.char_length, 0) > ${nStart})
       ORDER BY fr.created_at DESC
     `,
     sql`
@@ -42,6 +60,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       JOIN reader_sessions rs ON rs.id = se.reader_session_id
       LEFT JOIN reader_profiles rp ON rp.id = se.reader_profile_id
       WHERE se.author_note_id = ${id}
+         OR (se.chapter_version_id = ${cv} AND se.char_start IS NOT NULL
+             AND se.char_start < ${nEnd} AND se.char_start + COALESCE(se.char_length, 0) > ${nStart})
       ORDER BY se.created_at DESC
     `,
     sql`

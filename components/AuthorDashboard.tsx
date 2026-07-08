@@ -394,7 +394,7 @@ const FilterSelect = styled.select`
   }
 `;
 
-type ViewType = 'likes' | 'comments' | 'notes' | 'retention' | 'stats';
+type ViewType = 'likes' | 'comments' | 'notes' | 'stats';
 
 interface HeatmapLine {
   lineNumber: number;
@@ -616,7 +616,6 @@ export default function AuthorDashboard({ isProtected = false }: { isProtected?:
               { key: 'likes', label: 'Heatmap', w: CORNER_TAB_W, mask: '/corner_tab.svg' },
               { key: 'comments', label: 'Comments & Edits', w: FOLDER_TAB_W, mask: '/folder_tab.svg' },
               { key: 'notes', label: 'Notes', w: FOLDER_TAB_W, mask: '/folder_tab.svg' },
-              { key: 'retention', label: 'Retention', w: FOLDER_TAB_W, mask: '/folder_tab.svg' },
               { key: 'stats', label: 'Stats', w: FOLDER_TAB_W, mask: '/folder_tab.svg' },
             ];
             const activeIdx = tabs.findIndex(t => t.key === activeView);
@@ -734,13 +733,14 @@ export default function AuthorDashboard({ isProtected = false }: { isProtected?:
                           <AuthorNotesView
                             chapterHtml={chapterHtml}
                             chapterVersionId={chapterVersionId ?? ''}
+                            isLatestVersion={!displayedCommitSha || displayedCommitSha === currentCommitSha}
                           />
                         )}
-                        {activeView === 'retention' && (
-                          <RetentionView data={retentionData} signups={interestSignups} chapterHtml={chapterHtml} />
-                        )}
                         {activeView === 'stats' && (
-                          <StatsView versionId={chapterVersionId} />
+                          <>
+                            <StatsView versionId={chapterVersionId} />
+                            <RetentionView data={retentionData} signups={interestSignups} chapterHtml={chapterHtml} />
+                          </>
                         )}
                       </ContentTransition>
                     </AnimatePresence>

@@ -8,6 +8,34 @@ interface FootnoteEntry {
 
 const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
+/** Stable id for an embedded asset, derived from its URL so it survives re-renders. */
+function assetIdFor(href: string): string {
+  let h = 0;
+  for (let i = 0; i < href.length; i++) h = (h * 31 + href.charCodeAt(i)) >>> 0;
+  return 'asset-' + h.toString(36);
+}
+
+const VIDEO_RE = /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i;
+
+// Render markdown images as feedback-able assets. A markdown image whose URL is a
+// video extension becomes a <video>; everything else an <img>. Both carry
+// `class="chapter-asset"` + a stable `data-asset-id` so readers can click them to
+// leave feedback (instead of highlighting text).
+marked.use({
+  renderer: {
+    image(token: { href: string; title?: string | null; text?: string }) {
+      const href = token.href || '';
+      const id = assetIdFor(href);
+      const alt = escapeAttr(token.text || '');
+      const titleAttr = token.title ? ` title="${escapeAttr(token.title)}"` : '';
+      if (VIDEO_RE.test(href)) {
+        return `<video class="chapter-asset" data-asset-id="${id}" src="${escapeAttr(href)}" controls playsinline${titleAttr}></video>`;
+      }
+      return `<img class="chapter-asset" data-asset-id="${id}" src="${escapeAttr(href)}" alt="${alt}" loading="lazy"${titleAttr} />`;
+    },
+  },
+});
+
 export function renderMarkdown(content: string): string {
   const defs = new Map<string, FootnoteEntry>();
 
